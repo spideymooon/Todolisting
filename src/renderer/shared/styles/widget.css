@@ -1,0 +1,371 @@
+/* ============================================================================
+ * 桌面小组件样式（《00-架构设计》§14.4 / 参考图 2.jpg）
+ *
+ * 两条硬约束：
+ *  1. Win10 没有 Acrylic 背景模糊 —— 深色玻璃只能做到「均匀半透明」。
+ *     所以这里用的是 rgba 深色 + 细边框 + 内高光，而不是 backdrop-filter。
+ *     （backdrop-filter 在 Win10 的 Electron 里对系统壁纸无效，写了也只是安慰剂）
+ *  2. 窗口是 transparent 的，body 必须全透明，只有 .wg 这层有底色 ——
+ *     否则会出现一个方形的黑框，把圆角吞掉。
+ * ========================================================================== */
+
+.widget-body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  /* 整个窗口都能拖 —— 但我们只在 .wg-head 上真的开启，见下方说明 */
+  user-select: none;
+}
+
+html,
+body {
+  background: transparent;
+  height: 100%;
+}
+
+#widget-root {
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.wg {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+
+  /* 深色玻璃：rgba 而不是纯色，让桌面壁纸透一点出来 */
+  background: rgba(28, 29, 33, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  /* 只保留内高光（卡片内部）。外投影已删除：窗口是透明的，外投影会
+     在小组件四周糊出一圈灰边（用户反馈的「影子框框」），而真正想要的
+     系统级阴影由窗口本身负责（DWM 已关，就是要干干净净贴在桌面上） */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  color: #e9eaec;
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+/* ── 头部：拖拽把手 ────────────────────────────────────────────────────── */
+
+.wg-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px 8px;
+  flex: 0 0 auto;
+  /* 只有这条把手可拖拽。若整窗可拖，输入框里选字会变成拖窗口 */
+  -webkit-app-region: drag;
+}
+
+.wg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.24);
+  flex: 0 0 auto;
+}
+
+.wg-dot.is-live {
+  background: #e8a33d;
+  box-shadow: 0 0 6px rgba(232, 163, 61, 0.7);
+}
+
+.wg-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.wg-count {
+  margin-left: 2px;
+  font-size: 11px;
+  font-family: var(--font-num);
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.wg-icon-btn {
+  margin-left: auto;
+  /* 按钮必须显式退出拖拽区，否则点不动 */
+  -webkit-app-region: no-drag;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+
+.wg-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* 头部有两个按钮时，auto 外边距只该有第一个带（把两个一起推到右边） */
+.wg-icon-btn + .wg-icon-btn {
+  margin-left: 4px;
+}
+
+/* 置顶激活态：琥珀色 + 微底色，一眼能看出「现在是钉住的」 */
+.wg-icon-btn.is-active {
+  background: rgba(255, 176, 32, 0.16);
+  color: var(--due-today, #ffb020);
+}
+
+/* ── 快速添加 ─────────────────────────────────────────────────────────── */
+
+.wg-add {
+  position: relative;
+  padding: 0 12px 8px;
+  flex: 0 0 auto;
+}
+
+.wg-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e9eaec;
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+  /* 输入框要能选中文字，所以从「不可选中」里排除 */
+  user-select: text;
+}
+
+.wg-input::placeholder {
+  color: rgba(255, 255, 255, 0.32);
+}
+
+.wg-input:focus {
+  border-color: rgba(91, 141, 239, 0.75);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.wg-input.is-err {
+  border-color: rgba(229, 72, 77, 0.8);
+}
+
+.wg-flash {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: #4cb782;
+  pointer-events: none;
+}
+
+.wg-flash.is-err {
+  color: #e5575c;
+}
+
+/* ── 列表 ─────────────────────────────────────────────────────────────── */
+
+.wg-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 8px 8px;
+}
+
+.wg-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.wg-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 3px;
+}
+
+.wg-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.wg-empty {
+  padding: 26px 12px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.9;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.wg-empty-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.24);
+}
+
+/* ── 分组 ─────────────────────────────────────────────────────────────── */
+
+.wg-group + .wg-group {
+  margin-top: 2px;
+}
+
+.wg-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.wg-group-head:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* 分组色沿用主窗口的到期色调，保持视觉语言一致 */
+.wg-group-head.tone-overdue {
+  color: #e5575c;
+}
+.wg-group-head.tone-today {
+  color: #d9a24a;
+}
+.wg-group-head.tone-soon {
+  color: #a8863f;
+}
+.wg-group-head.tone-normal {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.wg-caret {
+  display: grid;
+  place-items: center;
+  width: 10px;
+  transition: transform 0.16s ease;
+}
+
+.wg-caret.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.wg-group-label {
+  flex: 1 1 auto;
+}
+
+.wg-group-count {
+  font-family: var(--font-num);
+  font-size: 10.5px;
+  opacity: 0.7;
+}
+
+.wg-group-body {
+  padding: 1px 0 3px;
+}
+
+/* ── 任务行 ───────────────────────────────────────────────────────────── */
+
+.wg-task {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px 5px 8px;
+  border-radius: 7px;
+  transition: background 0.12s, opacity 0.24s, transform 0.24s;
+}
+
+.wg-task:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* 勾选后先划线，再缩一下消失 —— 让「完成了」这件事有反馈 */
+.wg-task.is-done .wg-task-title {
+  text-decoration: line-through;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.wg-task.is-leaving {
+  opacity: 0;
+  transform: translateX(6px);
+}
+
+.wg-check {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1.4px solid rgba(255, 255, 255, 0.26);
+  border-radius: 50%;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+
+.wg-check:hover {
+  border-color: #4cb782;
+  background: rgba(76, 183, 130, 0.2);
+  color: #4cb782;
+}
+
+.wg-task-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+  /* 单行省略：小组件一行放不下就截断，不换行（换行会让高度不可控） */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wg-task-title:hover {
+  color: #ffffff;
+}
+
+.wg-task-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-family: var(--font-num);
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.wg-bell {
+  display: grid;
+  place-items: center;
+  color: rgba(232, 163, 61, 0.85);
+}
+
+/* ── 底部提示（仅置顶模式显示，提示如何取回焦点） ─────────────────────── */
+
+.wg-foot {
+  flex: 0 0 auto;
+  padding: 5px 12px 8px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.26);
+  text-align: center;
+}

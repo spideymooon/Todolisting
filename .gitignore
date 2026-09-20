@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+release/
+
+# Logs
+*.log
+electron-run.log
+
+# Local app data (dev runtime artifacts)
+*.sqlite
+*.sqlite-journal
+*.db
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
