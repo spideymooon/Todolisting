@@ -7,6 +7,8 @@ import {
   type NotificationLog,
   type SchedulerStatus
 } from '@shared/types'
+// 版本号唯一来源是 package.json 的 version，打包时 electron-builder 也读它 —— 两边永远一致
+import { version as appVersion } from '../../../../package.json'
 
 export function SettingsPage(): React.JSX.Element {
   const settings = useAppStore((s) => s.settings)
@@ -424,16 +426,8 @@ export function SettingsPage(): React.JSX.Element {
       <div className="settings-card">
         <div className="settings-row">
           <div>
-            <div className="settings-label">当前版本：v1.5 品牌与体验完善</div>
-            <div className="settings-desc" style={{ lineHeight: 1.8 }}>
-              已就位：SQLite 本地库 + 版本化迁移 · 任务 CRUD + 编辑器 · 常驻捕获条 · 看板三列与拖拽 ·
-              四个列表页 · 全局搜索 · 提醒时刻计算 · Windows 桌面通知 · PushPlus 微信推送（扫码获取
-              Token）· 提醒调度器 · 防重复通知四道防线 · 提醒日志与手动重发 · 系统托盘常驻 ·
-              开机启动 · 桌面小组件（置顶 / 透明度）· 无边框窗口与自绘标题栏 · 深色主题 ·
-              品牌图标（托盘 / 任务栏）· 存储目录自定义
-              <br />
-              尚未接入：重复任务、数据导入导出、应用打包
-            </div>
+            {/* 只显示版本号（用户要求：其他文字解释均不需要）。与 exe / 安装包同一来源 */}
+            <div className="settings-label">当前版本：v{appVersion}</div>
           </div>
         </div>
       </div>

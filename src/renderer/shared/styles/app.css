@@ -1318,6 +1318,36 @@ textarea {
   color: var(--due-soon);
 }
 
+/* 任务上的「这是重复任务」小循环箭头。与铃铛同色系，不抢视觉焦点 ——
+   它只是提示「完成后会自动续下一条」，不是需要用户行动的信号 */
+.repeat-dot {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+}
+
+/* 编辑器里的重复规则预览条。与 .remind-preview 同构：
+   规则描述 + 下一次的日期，让用户提交前就看清「到底会重复成什么样」 */
+.repeat-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.repeat-next {
+  color: var(--text-tertiary);
+}
+
 /* 通知日志 */
 .log-list {
   display: flex;

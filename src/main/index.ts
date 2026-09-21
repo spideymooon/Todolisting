@@ -14,7 +14,7 @@ import { WindowsNotifier } from './services/notification/windows-notifier'
 import { PushPlusNotifier } from './services/notification/pushplus-notifier'
 import { SchedulerService } from './services/notification/scheduler.service'
 import { TrayService, applyLaunchAtLogin, attachCloseToTray, markQuitting } from './system/tray'
-import { APP_USER_MODEL_ID, ensureDevStartMenuShortcut } from './system/dev-shortcut'
+import { APP_USER_MODEL_ID, ensureDevStartMenuShortcut, ensureInstalledShortcutAumid } from './system/dev-shortcut'
 import { createWidgetWindow } from './widgets/widget.window'
 import { seedSampleData } from './seed'
 import { registerIpc } from './ipc/register-ipc'
@@ -43,6 +43,9 @@ let tray: TrayService | null = null
  */
 if (app.isPackaged) {
   app.setAppUserModelId('com.desktoptodo.app')
+  // 安装器创建的快捷方式不带 AUMID（electron-builder NSIS 行为），任务栏
+  // 按 AUMID 找不到就显示通用图标 —— 启动时补写（幂等，重复执行无害）
+  ensureInstalledShortcutAumid()
 } else {
   app.setAppUserModelId(APP_USER_MODEL_ID)
   ensureDevStartMenuShortcut()

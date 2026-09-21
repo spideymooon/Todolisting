@@ -46,3 +46,34 @@ export function ensureDevStartMenuShortcut(): void {
     // 快捷方式写失败只影响任务栏图标显示，不能挡启动
   }
 }
+
+/**
+ * 打包态：把 AUMID 补写进安装器创建的快捷方式。
+ *
+ * 根因（朋友机器实测复现）：electron-builder NSIS 创建的快捷方式 **不带
+ * System.AppUserModel.ID**，而应用运行时 setAppUserModelId('com.desktoptodo.app')
+ * —— 任务栏按 AUMID 找快捷方式找不到，就回吐**通用图标**（白纸+蓝窗那个）。
+ *
+ * 解法：每次启动用 writeShortcutLink('update') 只覆盖 appUserModelId /
+ * 图标字段，其余（target/参数/安装目录）保持安装器写好的不动。开始菜单 +
+ * 桌面两个快捷方式都盖一遍，pin 到任务栏时 AUMID 会被继承。
+ */
+export function ensureInstalledShortcutAumid(): void {
+  try {
+    const candidates = [
+      join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'TodoList.lnk'),
+      join(app.getPath('desktop'), 'TodoList.lnk')
+    ]
+    for (const link of candidates) {
+      if (!existsSync(link)) continue
+      shell.writeShortcutLink(link, 'update', {
+        target: process.execPath,
+        appUserModelId: APP_USER_MODEL_ID,
+        icon: process.execPath,
+        iconIndex: 0
+      })
+    }
+  } catch {
+    // 快捷方式写失败只影响任务栏图标显示，不能挡启动
+  }
+}

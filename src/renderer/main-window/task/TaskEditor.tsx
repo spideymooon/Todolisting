@@ -2,6 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { formatFullDate, offsetKey } from '@shared/date'
 import { describePlan, nextReminderAt, type ReminderTask } from '@shared/reminder-plan'
 import {
+  REPEAT_END_OPTIONS,
+  REPEAT_FREQ_OPTIONS,
+  REPEAT_UNIT_OPTIONS,
+  WEEKDAY_LABELS,
+  defaultRule,
+  describeNextOccurrence,
+  describeRule,
+  describeRuleEnd,
+  type RepeatFreq,
+  type RepeatRule
+} from '@shared/repeat'
+import {
   REMINDER_DAY_PRESETS,
   type NotifyChannel,
   type Priority,
@@ -15,6 +27,22 @@ const TIME_PRESETS = ['09:00', '12:00', '20:00'] as const
 
 function dayLabel(days: number): string {
   return days === 0 ? '当天' : `提前 ${days} 天`
+}
+
+/**
+ * 给某个频率造一条规则。
+ * weekly 默认勾上当前截止日的星期（§4「每周按当前截止日的星期几」），
+ * 没选日期时兜底周一 —— 选了日期后服务层会再兜一次底。
+ */
+function makeRule(freq: RepeatFreq, dueDate: string | null): RepeatRule {
+  return defaultRule(freq, dueDate)
+}
+
+/** 规则 + 结束条件的合并文案 */
+function describeRuleLine(rule: RepeatRule): string {
+  const base = describeRule(rule)
+  const end = describeRuleEnd(rule)
+  return end ? `${base}（${end}）` : base
 }
 
 /**
@@ -63,6 +91,11 @@ export function TaskEditor({
       : settings.wechatNotifyEnabled
   )
   const [tagText, setTagText] = useState(task?.tags.map((t) => t.name).join(' ') ?? '')
+  /**
+   * 重复规则。null = 不重复（默认，§3「默认只显示不重复」）。
+   * 编辑模式下带回任务身上已有的规则。
+   */
+  const [repeatRule, setRepeatRule] = useState<RepeatRule | null>(task?.repeatRule ?? null)
   const [saving, setSaving] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
 
@@ -97,6 +130,9 @@ export function TaskEditor({
     task?.id ?? 'new'
   )
 
+  // 重复规则的结果也要先看得见 —— 与提醒预览同一个原则
+  const nextText = dueDate ? describeNextOccurrence(repeatRule, dueDate) : null
+
   const handleSave = async (): Promise<void> => {
     const trimmed = title.trim()
     if (!trimmed) return
@@ -113,6 +149,9 @@ export function TaskEditor({
         reminderDays,
         reminderTime,
         notifyChannels: channels,
+        // 没有截止日就没有推进锚点，规则落库会被服务层降级为不重复 —— 这里先清掉，
+        // 让「保存了什么」与「预览里说了什么」完全一致
+        repeatRule: dueDate ? repeatRule : null,
         tags: tagText
           .split(/[\s,，]+/)
           .map((s) => s.replace(/^#/, '').trim())
@@ -156,7 +195,7 @@ export function TaskEditor({
         <div className="modal-head">
           <div className="modal-title">{task ? '编辑任务' : '新建任务'}</div>
           <button type="button" className="icon-btn" title="关闭 (Esc)" onClick={onClose}>
-            <Icon name="plus" size={14} strokeWidth={1.8} />
+            <Icon name="close" size={14} strokeWidth={1.8} />
           </button>
         </div>
 
@@ -251,6 +290,162 @@ export function TaskEditor({
               <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
                 {formatFullDate(dueDate)}
               </div>
+            )}
+          </div>
+
+          {/* §2：字段顺序 截止 → 重复 → 提醒。§3：默认只显示「不重复」，选了才渐进展开 */}
+          <div className="field">
+            <div className="field-label">重复</div>
+            <div className="chips">
+              <button
+                type="button"
+                className={`chip${repeatRule === null ? ' is-active' : ''}`}
+                onClick={() => setRepeatRule(null)}
+              >
+                不重复
+              </button>
+              {REPEAT_FREQ_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`chip${repeatRule?.freq === opt.value ? ' is-active' : ''}`}
+                  onClick={() => setRepeatRule(makeRule(opt.value, dueDate))}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {!dueDate && repeatRule !== null && (
+              <div style={{ fontSize: 12, color: 'var(--due-soon)' }}>
+                重复需要截止日期作为推进基准，请先选一个日期
+              </div>
+            )}
+
+            {repeatRule !== null && dueDate && (
+              <>
+                {/* custom：每 [N] [天/周/月] */}
+                {repeatRule.freq === 'custom' && (
+                  <div className="chips" style={{ marginTop: 4 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>每</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      className="input"
+                      style={{ width: 66, padding: '4px 8px', fontSize: 12 }}
+                      value={repeatRule.interval}
+                      onChange={(e) =>
+                        setRepeatRule((r) =>
+                          r ? { ...r, interval: Math.max(1, Number(e.target.value) || 1) } : r
+                        )
+                      }
+                    />
+                    {REPEAT_UNIT_OPTIONS.map((u) => (
+                      <button
+                        key={u.value}
+                        type="button"
+                        className={`chip${repeatRule.unit === u.value ? ' is-active' : ''}`}
+                        onClick={() => setRepeatRule((r) => (r ? { ...r, unit: u.value } : r))}
+                      >
+                        {u.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* weekly：多选星期，默认勾当前截止日的星期 */}
+                {repeatRule.freq === 'weekly' && (
+                  <div className="chips" style={{ marginTop: 4 }}>
+                    {WEEKDAY_LABELS.map((label, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        className={`chip${repeatRule.weekdays.includes(idx) ? ' is-active' : ''}`}
+                        onClick={() =>
+                          setRepeatRule((r) => {
+                            if (!r) return r
+                            const has = r.weekdays.includes(idx)
+                            // 至少留一个，否则规则会退化成「每周什么也不做」
+                            if (has && r.weekdays.length === 1) return r
+                            return {
+                              ...r,
+                              weekdays: has
+                                ? r.weekdays.filter((d) => d !== idx)
+                                : [...r.weekdays, idx].sort((a, b) => a - b)
+                            }
+                          })
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* 结束条件。§5 默认「永不」 */}
+                <div className="field-label" style={{ marginTop: 4 }}>
+                  结束
+                </div>
+                <div className="chips">
+                  {REPEAT_END_OPTIONS.map((e) => (
+                    <button
+                      key={e.value}
+                      type="button"
+                      className={`chip${repeatRule.endType === e.value ? ' is-active' : ''}`}
+                      onClick={() =>
+                        setRepeatRule((r) => {
+                          if (!r) return r
+                          if (e.value === 'until') {
+                            // 没给日期时给个合理默认：当前截止日的 3 个月后
+                            return { ...r, endType: 'until', endDate: r.endDate ?? offsetKey(now, 90) }
+                          }
+                          return { ...r, endType: e.value }
+                        })
+                      }
+                    >
+                      {e.label}
+                    </button>
+                  ))}
+                </div>
+                {repeatRule.endType === 'until' && (
+                  <input
+                    type="date"
+                    className="input"
+                    style={{ marginTop: 4 }}
+                    value={repeatRule.endDate ?? ''}
+                    onChange={(e) =>
+                      setRepeatRule((r) => (r ? { ...r, endDate: e.target.value || null } : r))
+                    }
+                  />
+                )}
+                {repeatRule.endType === 'count' && (
+                  <div className="chips" style={{ marginTop: 4 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>共</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={999}
+                      className="input"
+                      style={{ width: 66, padding: '4px 8px', fontSize: 12 }}
+                      value={repeatRule.endCount}
+                      onChange={(e) =>
+                        setRepeatRule((r) =>
+                          r ? { ...r, endCount: Math.max(2, Number(e.target.value) || 2) } : r
+                        )
+                      }
+                    />
+                    <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>次</span>
+                  </div>
+                )}
+
+                {/* 结果先看得见：规则描述 + 下一次的日期。与提醒预览同一个原则 */}
+                <div className="repeat-preview">
+                  <Icon name="repeat" size={14} />
+                  <span>{describeRuleLine(repeatRule)}</span>
+                  {nextText && <span className="repeat-next">下次：{nextText}</span>}
+                </div>
+              </>
             )}
           </div>
 

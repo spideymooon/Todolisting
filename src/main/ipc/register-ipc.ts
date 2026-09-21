@@ -209,7 +209,11 @@ const NOTIFY_SETTING_KEYS: Array<keyof AppSettings> = [
   'overduePolicy'
 ]
 
-/** 改动这些设置需要真正创建/销毁小组件窗口 */
+/**
+ * 改动这些设置需要真正创建/销毁小组件窗口。
+ * widgetScope 刻意不在这里：它只影响小组件取数，不需要重建窗口 ——
+ * settingsSet 末尾的 broadcastTasksChanged() 会叫醒小组件重新拉数据。
+ */
 const WIDGET_SETTING_KEYS: Array<keyof AppSettings> = [
   'widgetEnabled',
   'widgetAlwaysOnTop'

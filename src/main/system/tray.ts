@@ -10,9 +10,12 @@
  */
 
 import { app, Menu, nativeImage, Tray, type BrowserWindow } from 'electron'
-// 品牌图标（唯一源 scripts/todolist-icon.png，gen-icons.mjs 产出的 512×512 方形版）。
-// 与主窗口/将来的 exe 图标同一来源，托盘不再用单独生成的图形
-import appIcon from '../../../resources/icon.png?asset'
+import { readFileSync } from 'node:fs'
+// 品牌图标（唯一源 scripts/todolist-{16,32}x*.png，gen-icons.mjs 装配产出）。
+// 托盘直接用**逐档手工像素**的 16/32 两档，不再从大图缩放 ——
+// 源图是为小尺寸专门对过像素的，任何运行时重采样都会把锯齿带回来
+import trayIcon16 from '../../../resources/icon-16.png?asset'
+import trayIcon32 from '../../../resources/icon-32.png?asset'
 
 export interface TrayCallbacks {
   /** 显示并聚焦主窗口 */
@@ -28,14 +31,14 @@ export interface TrayCallbacks {
 /**
  * 托盘图标。
  *
- * 用品牌图（resources/icon.png，512×512）缩到 32×32：托盘在 100% DPI 下要 16px、
- * 高 DPI 下要 20–24px，给 32px 让系统向下缩放，各档位都清晰。
+ * 双档位表示：100% DPI 下系统要 16px、200% 要 32px，
+ * 分别对应 resources/icon-16.png / icon-32.png 两张手工处理过的图，
+ * 由系统按 DPI 自选，不做任何缩放。
  * （不再用 gen-tray-icon.mjs 生成的内联 base64 简化图 —— 用户要求托盘也用正式
  * 品牌图；该脚本保留作历史参考，不再被引用。）
  *
  * 历史教训仍然有效：手写占位 base64 会让 createFromDataURL 静默得到空图，
- * 托盘显示白块且无任何报错 —— 换成 `?asset` 文件路径后 createFromPath
- * 失败同样可能得到空图，所以下面显式 isEmpty() 兜底回退 data URL 的旧图。
+ * 托盘显示白块且无任何报错 —— 所以下面显式 isEmpty() 兜底回退 data URL 的旧图。
  */
 const FALLBACK_PNG_DATA_URL =
   'data:image/png;base64,' +
@@ -50,14 +53,14 @@ export class TrayService {
   create(): void {
     if (this.tray) return
 
-    let icon = nativeImage
-      .createFromPath(appIcon)
-      .resize({ width: 32, height: 32, quality: 'best' })
-    if (icon.isEmpty()) {
-      // 防线：路径在 dev/打包后失效时不能让托盘变白块 —— 回退旧的内联图
-      icon = nativeImage.createFromDataURL(FALLBACK_PNG_DATA_URL)
-    }
-    this.tray = new Tray(icon)
+    const icon = nativeImage.createEmpty()
+    icon.addRepresentation({ scaleFactor: 1, buffer: readFileSync(trayIcon16) })
+    icon.addRepresentation({ scaleFactor: 2, buffer: readFileSync(trayIcon32) })
+    const finalIcon = icon.isEmpty()
+      ? // 防线：路径在 dev/打包后失效时不能让托盘变白块 —— 回退旧的内联图
+        nativeImage.createFromDataURL(FALLBACK_PNG_DATA_URL)
+      : icon
+    this.tray = new Tray(finalIcon)
     this.tray.setToolTip('TodoList —— 提醒引擎运行中')
     this.tray.setContextMenu(this.buildMenu())
 

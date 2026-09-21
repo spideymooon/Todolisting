@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { dueLabel } from '@shared/date'
 import { describeReminderRule } from '@shared/reminder-plan'
+import { describeRule } from '@shared/repeat'
 import type { Priority, Task } from '@shared/types'
 import { CheckCircle } from '@renderer/shared/components/CheckCircle'
 import { TagPill } from '@renderer/shared/components/TagPill'
@@ -70,6 +71,12 @@ export function TaskCard({
             <TagPill key={t.id} tag={t} />
           ))}
         </div>
+        {/* 重复标记：与铃铛同一行，语义上都是「这条任务有后续」 */}
+        {task.repeatRule && (
+          <span className="repeat-dot" title={`重复：${describeRule(task.repeatRule)}`}>
+            <Icon name="repeat" size={13} />
+          </span>
+        )}
         {/* 铃铛只在「真的会提醒」时出现：没有截止日期就没有提醒锚点 */}
         {task.reminderEnabled && task.dueDate && !done && (
           <span className="remind-dot" title={describeReminderRule(task)}>

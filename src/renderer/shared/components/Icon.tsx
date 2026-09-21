@@ -15,6 +15,7 @@ export type IconName =
   | 'edit'
   | 'close'
   | 'widget'
+  | 'repeat'
 
 const PATHS: Record<IconName, JSX.Element> = {
   calendar: (
@@ -90,6 +91,15 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <rect x="2" y="3" width="12" height="10" rx="1.8" />
       <rect x="8.4" y="7.4" width="4" height="4" rx="1" fill="currentColor" stroke="none" />
+    </>
+  ),
+  /** 重复任务：两条首尾相接的循环箭头，一眼能认出是「循环」而不是「刷新」 */
+  repeat: (
+    <>
+      <path d="M4.4 5.6h7.2a2.4 2.4 0 0 1 2.4 2.4v.6" />
+      <path d="M6.6 3.4 4.4 5.6l2.2 2.2" />
+      <path d="M11.6 10.4H4.4A2.4 2.4 0 0 1 2 8v-.6" />
+      <path d="M9.4 12.6l2.2-2.2-2.2-2.2" />
     </>
   )
 }

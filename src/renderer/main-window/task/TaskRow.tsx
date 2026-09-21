@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { dueLabel } from '@shared/date'
 import { describeReminderRule } from '@shared/reminder-plan'
+import { describeRule } from '@shared/repeat'
 import type { Task } from '@shared/types'
 import { CheckCircle } from '@renderer/shared/components/CheckCircle'
 import { TagPill } from '@renderer/shared/components/TagPill'
@@ -72,6 +73,11 @@ export function TaskRow({
         {task.tags.slice(0, 2).map((t) => (
           <TagPill key={t.id} tag={t} />
         ))}
+        {task.repeatRule && (
+          <span className="repeat-dot" title={`重复：${describeRule(task.repeatRule)}`}>
+            <Icon name="repeat" size={13} />
+          </span>
+        )}
         {task.reminderEnabled && task.dueDate && !done && (
           <span className="remind-dot" title={describeReminderRule(task)}>
             <Icon name="bell" size={13} />

@@ -1,5 +1,9 @@
 /** 主进程与渲染进程共用的领域类型与 IPC 契约常量 */
 
+import type { RepeatRule } from './repeat'
+
+export type { RepeatRule }
+
 export type TaskStatus = 'pending' | 'completed'
 export type Priority = 1 | 2 | 3
 export type TagColor = 'red' | 'green' | 'blue' | 'amber' | 'purple' | 'gray'
@@ -57,6 +61,20 @@ export interface Task {
   reminderTime: string
   /** 该任务走哪些通道 */
   notifyChannels: NotifyChannel
+  /**
+   * 重复规则。null = 不重复。
+   *
+   * 语义是「**这条实例完成后**按什么规则续下一实例」—— 所以它挂在**当前活跃实例**上，
+   * 而不是某个独立的规则表里（《TodoList-重复任务功能》§6：规则 + 当前实例，
+   * 绝不预生成未来任务）。历史已完成实例身上仍留着当时的规则，供「已完成」页回显。
+   */
+  repeatRule: RepeatRule | null
+  /**
+   * 同一条重复规则的实例串联 id。
+   * 首个实例写入自身 id，后续实例继承同一个值；非重复任务为 null。
+   * 生成下一实例前用它做幂等判断（series_id + due_date 是否已存在）。
+   */
+  seriesId: string | null
   completedAt: string | null
   sortOrder: number
   createdAt: string
@@ -89,6 +107,8 @@ export interface CreateTaskInput {
   reminderDays?: number
   reminderTime?: string
   notifyChannels?: NotifyChannel
+  /** 重复规则。null / 不传 = 不重复。见 @shared/repeat 的 normalizeRule */
+  repeatRule?: RepeatRule | null
 }
 
 export interface TaskPatch {
@@ -102,6 +122,13 @@ export interface TaskPatch {
   reminderDays?: number
   reminderTime?: string
   notifyChannels?: NotifyChannel
+  /**
+   * 重复规则。null = 改为不重复。
+   *
+   * §10：第一版默认「修改当前实例及后续重复规则」—— 改规则只影响当前活跃实例与
+   * 它之后生成的实例，**不改动历史已完成记录**（那些实例身上留着当时的规则快照）。
+   */
+  repeatRule?: RepeatRule | null
 }
 
 export interface CategorySummary {
@@ -182,6 +209,19 @@ export interface DispatchResult {
   reentrant: number
 }
 
+/**
+ * 小组件显示内容的取数范围。
+ *
+ * 取值与 ListScope 对齐（见 @shared/api）—— 小组件设置页就是让用户
+ * 在这几个「页面视图」里挑一个挂到桌面上：
+ *   today     今天页：逾期 + 今天
+ *   upcoming  即将到期页：今天之后
+ *   window    最近三天（旧版小组件的固定行为，保留作为可选项）
+ *   all       全部任务：所有未完成任务（含无日期的）—— **默认值**
+ *   completed 已完成页
+ */
+export type WidgetScope = 'today' | 'upcoming' | 'window' | 'all' | 'completed'
+
 export interface AppSettings {
   captureDefaultTarget: 'today' | 'pool'
   theme: 'light' | 'dark' | 'system'
@@ -209,6 +249,11 @@ export interface AppSettings {
   widgetY: number | null
   /** 小组件背景不透明度（0-100，百分比）。默认 86 —— 全透明看不清，不透明又太实 */
   widgetOpacity: number
+  /**
+   * 小组件显示内容的取数范围。默认 'all'（显示所有未完成任务），
+   * 可在主窗口「小组件」设置页切换。见 WidgetScope 注释
+   */
+  widgetScope: WidgetScope
 
   // ── Phase 4：PushPlus ──
   /** PushPlus token。属敏感凭据，只存本地 SQLite，不出现在日志里 */
@@ -245,6 +290,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   widgetX: null,
   widgetY: null,
   widgetOpacity: 86,
+  widgetScope: 'all',
 
   pushplusToken: '',
   pushplusTopic: ''

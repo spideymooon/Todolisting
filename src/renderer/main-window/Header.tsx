@@ -12,7 +12,7 @@ import { useAppStore, type PageKey } from '@renderer/shared/store/appStore'
 const TITLES: Record<PageKey, string> = {
   today: '今天',
   board: '今天',
-  upcoming: '即将到期',
+  upcoming: '待办任务',
   all: '全部任务',
   completed: '已完成',
   search: '搜索',
@@ -26,7 +26,7 @@ function subtitle(page: PageKey, today: string, counts: CategorySummary | null):
     case 'board':
       return formatFullDateDotted(today)
     case 'upcoming':
-      return counts ? `${counts.upcomingCount} 项在未来到期` : '未来到期的任务'
+      return counts ? `共 ${counts.upcomingCount} 项待办` : '未来到期的任务'
     case 'all':
       return counts ? `共 ${counts.allCount} 项未完成` : '所有未删除任务'
     case 'completed':
@@ -34,7 +34,7 @@ function subtitle(page: PageKey, today: string, counts: CategorySummary | null):
     case 'search':
       return '搜索任务标题与备注'
     case 'widget':
-      return '贴在桌面上的最近待办'
+      return '贴在桌面上的待办便签'
     case 'settings':
       return '本地数据与偏好'
   }

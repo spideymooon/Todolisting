@@ -121,6 +121,94 @@ body {
   color: var(--due-today, #ffb020);
 }
 
+/* ── 左上角：页面切换器（点标题弹菜单）────────────────────────────────── */
+
+.wg-scope {
+  position: relative;
+  /* 菜单区域整体退出拖拽，否则点击会变成拖窗口 */
+  -webkit-app-region: no-drag;
+  min-width: 0;
+}
+
+.wg-title-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.14s;
+}
+
+.wg-title-btn:hover,
+.wg-title-btn.is-open {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.wg-title-caret {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.4);
+  transition: transform 0.16s ease;
+}
+
+.wg-title-btn.is-open .wg-title-caret {
+  transform: rotate(180deg);
+}
+
+/* 点外面收起用的透明遮罩。fixed 不受 .wg overflow:hidden 裁剪 */
+.wg-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+.wg-scope-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 31;
+  min-width: 128px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(43, 44, 49, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.wg-scope-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.wg-scope-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+/* 当前页：琥珀色高亮，与置顶图钉同一强调色 */
+.wg-scope-item.is-active {
+  color: #ffb020;
+}
+
 /* ── 快速添加 ─────────────────────────────────────────────────────────── */
 
 .wg-add {

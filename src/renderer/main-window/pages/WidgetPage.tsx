@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@renderer/shared/store/appStore'
 import type { WidgetStatus } from '@shared/types'
+import { WIDGET_SCOPE_OPTIONS } from '@renderer/widgets/widgetStore'
 
 /**
  * 「小组件」独立页（从设置页拆出，用户反馈：桌面挂件的开关属于日常操作，
@@ -32,7 +33,7 @@ export function WidgetPage(): React.JSX.Element {
               显示小组件 {widget?.visible ? '· 已显示' : widget?.enabled ? '· 待显示' : ''}
             </div>
             <div className="settings-desc">
-              贴在桌面上的「最近待办」便签，显示逾期 / 今天 / 明天 / 后天。
+              贴在桌面上的待办便签，显示内容在下方选择。
               也可以直接点小组件头部的 ✕ 关闭
             </div>
           </div>
@@ -45,6 +46,27 @@ export function WidgetPage(): React.JSX.Element {
               )
             }
           />
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">显示内容</div>
+            <div className="settings-desc">
+              小组件里显示哪个页面的任务，默认显示全部未完成任务。修改后桌面小组件实时生效
+            </div>
+          </div>
+          <div className="seg">
+            {WIDGET_SCOPE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={(settings.widgetScope ?? 'all') === opt.value ? 'is-active' : ''}
+                onClick={() => void updateSettings({ widgetScope: opt.value })}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="settings-row">

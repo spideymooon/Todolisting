@@ -11,17 +11,30 @@
 
 import { create } from 'zustand'
 import type { CaptureTarget } from '@shared/capture-parse'
-import type { AppSettings, Task } from '@shared/types'
+import type { AppSettings, Task, WidgetScope } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/types'
-import type { ListScope } from '@shared/api'
 
 /**
- * 小组件取数用 `window` scope = 逾期 + 今天 + 明天 + 后天。
- *
- * 注意不要改成 `upcoming`：那个 scope 的 SQL 是 `due_date > today`，
- * 会把「今天」和「逾期」全部排除掉，小组件就永远是空的。
+ * 合法取数范围白名单。settings 里存的值不可信（可能是旧版本写入或被手改），
+ * 不在白名单里一律回落到 'all' —— 与 DEFAULT_SETTINGS.widgetScope 保持一致。
  */
-const WIDGET_SCOPE: ListScope = 'window'
+const WIDGET_SCOPES: readonly WidgetScope[] = ['today', 'upcoming', 'window', 'all', 'completed']
+
+export function widgetScopeOf(settings: AppSettings): WidgetScope {
+  return WIDGET_SCOPES.includes(settings.widgetScope) ? settings.widgetScope : 'all'
+}
+
+/**
+ * 显示页面的可选项。小组件左上角的切换菜单与主窗口「小组件」设置页共用这一份，
+ * 顺序即菜单顺序：默认的「全部任务」放最前。
+ */
+export const WIDGET_SCOPE_OPTIONS: Array<{ value: WidgetScope; label: string }> = [
+  { value: 'all', label: '全部任务' },
+  { value: 'today', label: '今天' },
+  { value: 'upcoming', label: '待办任务' },
+  { value: 'window', label: '最近三天' },
+  { value: 'completed', label: '已完成' }
+]
 
 interface WidgetState {
   tasks: Task[]
@@ -38,6 +51,8 @@ interface WidgetState {
   setPinned: (on: boolean) => Promise<void>
   /** 头部 ✕：直接关掉小组件（写 widgetEnabled=false，主进程销毁窗口） */
   hide: () => Promise<void>
+  /** 左上角菜单切换显示页面：落库 + 按新范围重新取数 */
+  setScope: (scope: WidgetScope) => Promise<void>
   openMain: (taskId?: string) => Promise<void>
   clearJustDone: () => void
 }
@@ -49,20 +64,18 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   justDoneId: null,
 
   load: async () => {
-    const [settings, tasks] = await Promise.all([
-      window.api.settings.get(),
-      window.api.task.list(WIDGET_SCOPE)
-    ])
+    // scope 跟随设置（默认 all = 所有未完成任务），所以必须先拿 settings 再取数
+    const settings = await window.api.settings.get()
+    const tasks = await window.api.task.list(widgetScopeOf(settings))
     set({ settings, tasks, ready: true })
   },
 
   refresh: async () => {
-    // settings 一起重取：置顶开关在设置页也可能被改，任务广播顺带把
-    // 图钉状态对齐，两个入口永远以落库值为准
-    const [settings, tasks] = await Promise.all([
-      window.api.settings.get(),
-      window.api.task.list(WIDGET_SCOPE)
-    ])
+    // settings 一起重取：置顶开关、显示范围在设置页也可能被改，任务广播顺带把
+    // 图钉状态与取数范围对齐，两个入口永远以落库值为准。
+    // 设置页改 widgetScope 时 settingsSet 末尾的 broadcastTasksChanged 会叫醒这里
+    const settings = await window.api.settings.get()
+    const tasks = await window.api.task.list(widgetScopeOf(settings))
     set({ settings, tasks })
   },
 
@@ -94,6 +107,13 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
     // settingsSet handler 里有 WIDGET_SETTING_KEYS 拦截：widgetEnabled 变更
     // 会触发 syncWidgetWindow()，把当前窗口销毁 —— 所以这里不用也不能自己 close
     await window.api.settings.set({ widgetEnabled: false })
+  },
+
+  setScope: async (scope) => {
+    // 与设置页走同一条 settingsSet 路径：主进程广播 tasksChanged，
+    // refresh() 会以新 scope 重新取数；这里再回填一次 settings 保证标题即时更新
+    await window.api.settings.set({ widgetScope: scope })
+    await get().refresh()
   },
 
   openMain: async (taskId) => {

@@ -10,7 +10,7 @@ interface NavDef {
 const NAV: NavDef[] = [
   { key: 'today', icon: 'calendar', label: '今天' },
   { key: 'board', icon: 'board', label: '看板' },
-  { key: 'upcoming', icon: 'clock', label: '即将到期' },
+  { key: 'upcoming', icon: 'clock', label: '待办任务' },
   { key: 'all', icon: 'list', label: '全部任务' },
   { key: 'completed', icon: 'check-circle', label: '已完成' },
   { key: 'widget', icon: 'widget', label: '小组件' }

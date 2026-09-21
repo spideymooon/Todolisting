@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type CaptureTarget } from '@shared/capture-parse'
 import { dateKeyLabel, diffDays, todayKey } from '@shared/date'
-import type { Task } from '@shared/types'
-import { useWidgetStore } from './widgetStore'
+import type { Task, WidgetScope } from '@shared/types'
+import { useWidgetStore, widgetScopeOf, WIDGET_SCOPE_OPTIONS } from './widgetStore'
 
 /**
- * 桌面小组件：最近待办（《00-架构设计》§14.4）。
+ * 桌面小组件：桌面待办便签（《00-架构设计》§14.4）。
  *
- * 内容取舍：只显示「逾期 + 今天 + 明天 + 后天」四组。
- * 再远的事情放在桌面上没有决策价值（挡视线），需要看全量时点一下进主窗口。
+ * 内容取舍跟随设置里的 widgetScope（主窗口「小组件」页可改），默认 all =
+ * 所有未完成任务。分组渲染是通用的：按相对今天的日期差落桶，
+ * 不在当前 scope 取数范围内的桶自然为空、不渲染。
  *
  * 三处复用既有约定，避免另起炉灶：
  *  1. 快速添加用 @shared/capture-parse 解析、走同一个 `task:capture` IPC
@@ -17,13 +18,22 @@ import { useWidgetStore } from './widgetStore'
  */
 
 interface Group {
-  key: 'overdue' | 'today' | 'tomorrow' | 'dayAfter'
+  key: 'overdue' | 'today' | 'tomorrow' | 'dayAfter' | 'later' | 'nodate' | 'completed'
   label: string
   tone: 'overdue' | 'today' | 'soon' | 'normal'
   tasks: Task[]
 }
 
-/** 默认折叠状态：四组都展开。折叠状态只在本次会话内有效（组件级 state） */
+/** 各显示范围下的标题与空态文案 */
+const SCOPE_TEXT: Record<WidgetScope, { title: string; empty: string }> = {
+  today: { title: '今天待办', empty: '今天没有待办' },
+  upcoming: { title: '待办任务', empty: '没有未来的待办' },
+  window: { title: '最近待办', empty: '最近三天没有待办' },
+  all: { title: '全部待办', empty: '没有待办任务' },
+  completed: { title: '已完成', empty: '还没有已完成的任务' }
+}
+
+/** 默认折叠状态：所有组都展开。折叠状态只在本次会话内有效（组件级 state） */
 const COLLAPSE_KEY = 'todolet.widget.collapsed'
 
 export function WidgetApp(): React.JSX.Element {
@@ -39,7 +49,10 @@ export function WidgetApp(): React.JSX.Element {
   const hide = useWidgetStore((s) => s.hide)
   const openMain = useWidgetStore((s) => s.openMain)
   const clearJustDone = useWidgetStore((s) => s.clearJustDone)
+  const setScope = useWidgetStore((s) => s.setScope)
   const pinned = settings.widgetAlwaysOnTop
+
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try {
@@ -77,42 +90,75 @@ export function WidgetApp(): React.JSX.Element {
   }, [collapsed])
 
   const groups = useMemo<Group[]>(() => {
+    const scope = widgetScopeOf(settings)
+
+    // 已完成视图：SQL 侧已按 completed_at 倒序排好，直接一组平铺
+    if (scope === 'completed') {
+      return [
+        {
+          key: 'completed',
+          label: '已完成',
+          tone: 'normal',
+          tasks: tasks.filter((t) => t.status === 'completed')
+        }
+      ]
+    }
+
     const today = todayKey()
-    const buckets: Record<Group['key'], Task[]> = {
+    const buckets: Record<Exclude<Group['key'], 'completed'>, Task[]> = {
       overdue: [],
       today: [],
       tomorrow: [],
-      dayAfter: []
+      dayAfter: [],
+      later: [],
+      nodate: []
     }
     for (const t of tasks) {
-      if (t.status === 'completed' || !t.dueDate) continue
+      if (t.status === 'completed') continue
+      if (!t.dueDate) {
+        // 无日期任务只在「全部任务」范围出现（其他 scope 的 SQL 都要求 due_date）
+        buckets.nodate.push(t)
+        continue
+      }
       const delta = diffDays(today, t.dueDate)
       if (delta < 0) buckets.overdue.push(t)
       else if (delta === 0) buckets.today.push(t)
       else if (delta === 1) buckets.tomorrow.push(t)
       else if (delta === 2) buckets.dayAfter.push(t)
+      else buckets.later.push(t)
     }
-    // 逾期组内按逾期天数倒序（最久的在最上面），其余按截止时刻
+    // 逾期组内按逾期天数倒序（最久的在最上面），其余按截止时刻/日期
     buckets.overdue.sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))
     for (const k of ['today', 'tomorrow', 'dayAfter'] as const) {
       buckets[k].sort((a, b) => (a.dueTime ?? '99:99').localeCompare(b.dueTime ?? '99:99'))
     }
+    buckets.later.sort(
+      (a, b) =>
+        (a.dueDate ?? '').localeCompare(b.dueDate ?? '') ||
+        (a.dueTime ?? '99:99').localeCompare(b.dueTime ?? '99:99')
+    )
     const LABEL: Record<Group['key'], string> = {
       overdue: '已逾期',
       today: '今天',
       tomorrow: '明天',
-      dayAfter: '后天'
+      dayAfter: '后天',
+      later: '以后',
+      nodate: '无日期',
+      completed: '已完成'
     }
     const TONE: Record<Group['key'], Group['tone']> = {
       overdue: 'overdue',
       today: 'today',
       tomorrow: 'soon',
-      dayAfter: 'normal'
+      dayAfter: 'normal',
+      later: 'normal',
+      nodate: 'normal',
+      completed: 'normal'
     }
-    return (['overdue', 'today', 'tomorrow', 'dayAfter'] as const)
+    return (['overdue', 'today', 'tomorrow', 'dayAfter', 'later', 'nodate'] as const)
       .map((key) => ({ key, label: LABEL[key], tone: TONE[key], tasks: buckets[key] }))
       .filter((g) => g.tasks.length > 0)
-  }, [tasks])
+  }, [tasks, settings])
 
   const total = groups.reduce((n, g) => n + g.tasks.length, 0)
 
@@ -144,6 +190,15 @@ export function WidgetApp(): React.JSX.Element {
     })
   }
 
+  const scope = widgetScopeOf(settings)
+  const scopeText = SCOPE_TEXT[scope]
+
+  /** 左上角菜单选中某个页面：切换 scope 并收起菜单 */
+  const pickScope = (next: WidgetScope): void => {
+    setMenuOpen(false)
+    if (next !== scope) void setScope(next)
+  }
+
   return (
     <div
       className="wg"
@@ -153,7 +208,60 @@ export function WidgetApp(): React.JSX.Element {
           同时保证它不覆盖输入框与任务行，否则会吃掉点击 */}
       <div className="wg-head">
         <span className={`wg-dot${total > 0 ? ' is-live' : ''}`} />
-        <span className="wg-title">最近待办</span>
+        {/* 左上角 = 页面切换器：点标题弹出菜单选显示哪个页面的任务 */}
+        <div className="wg-scope">
+          <button
+            type="button"
+            className={`wg-title-btn${menuOpen ? ' is-open' : ''}`}
+            title="点击切换显示的页面"
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            <span className="wg-title">{scopeText.title}</span>
+            <span className="wg-title-caret">
+              <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true">
+                <path
+                  d="M2 3.5 5 6.5 8 3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          </button>
+          {menuOpen && (
+            <>
+              {/* 透明遮罩：点菜单外面任意处收起 */}
+              <div className="wg-menu-overlay" onClick={() => setMenuOpen(false)} />
+              <div className="wg-scope-menu" role="menu">
+                {WIDGET_SCOPE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="menuitem"
+                    className={`wg-scope-item${opt.value === scope ? ' is-active' : ''}`}
+                    onClick={() => pickScope(opt.value)}
+                  >
+                    <span>{opt.label}</span>
+                    {opt.value === scope && (
+                      <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+                        <path
+                          d="M2 6.4 4.6 9 10 3.2"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
         <span className="wg-count">{total > 0 ? total : ''}</span>
         <button
           type="button"
@@ -234,7 +342,7 @@ export function WidgetApp(): React.JSX.Element {
 
         {ready && total === 0 && (
           <div className="wg-empty">
-            最近三天没有待办
+            {scopeText.empty}
             <br />
             <span className="wg-empty-sub">在上面输入框记一条试试</span>
           </div>
@@ -340,8 +448,8 @@ export function WidgetApp(): React.JSX.Element {
   )
 }
 
-/** 逾期任务显示原始日期（「今天/明天」对逾期无意义） */
+/** 逾期 / 更远期任务显示原始日期（「今天/明天」对它们没有定位价值） */
 function shortDate(t: Task, groupKey: Group['key']): string {
-  if (groupKey === 'overdue') return t.dueDate ? dateKeyLabel(t.dueDate) : ''
+  if (groupKey === 'overdue' || groupKey === 'later') return t.dueDate ? dateKeyLabel(t.dueDate) : ''
   return ''
 }

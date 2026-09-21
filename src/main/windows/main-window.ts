@@ -1,7 +1,7 @@
 import { BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { IPC } from '@shared/types'
-// 品牌图标（scripts/todolist-icon.png 的唯一下游之一，gen-icons.mjs 生成）。
+// 品牌图标（scripts/todolist-256x256.png 的下游，gen-icons.mjs 装配产出）。
 // Windows 上 BrowserWindow 的 icon 同时决定：窗口图标 + 任务栏图标；
 // 打包成 exe 后任务栏改用 exe 内嵌图标（build/icon.ico），两者同源一致
 import appIcon from '../../../resources/icon.png?asset'

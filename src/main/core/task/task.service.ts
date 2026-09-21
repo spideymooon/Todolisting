@@ -11,7 +11,14 @@ import { randomUUID } from 'node:crypto'
 import { inTransaction, type Db } from '../database/connection'
 import { TaskRepository, tagColorFor } from './task.repository'
 import { parseCapture, type CaptureTarget } from '@shared/capture-parse'
-import { offsetKey, toDateKey, toUtcIso } from '@shared/date'
+import { offsetKey, toDateKey, toUtcIso, weekdayIndex } from '@shared/date'
+import {
+  bumpDoneCount,
+  nextOccurrence,
+  normalizeRule,
+  serializeRule,
+  type RepeatRule
+} from '@shared/repeat'
 import type {
   BoardData,
   CaptureResult,
@@ -133,6 +140,8 @@ export class TaskService {
     // 静默重排全库历史任务的提醒，用户无法预期。
     const defaults = this.reminderDefaults()
 
+    const repeatRule = this.prepareRule(input.repeatRule, dueDate)
+
     return inTransaction(this.db, () => {
       this.repo.insert({
         id,
@@ -146,6 +155,10 @@ export class TaskService {
         reminderDays: Math.max(0, Math.floor(input.reminderDays ?? defaults.reminderDays)),
         reminderTime: input.reminderTime ?? defaults.reminderTime,
         notifyChannels: input.notifyChannels ?? defaults.notifyChannels,
+        repeatRule,
+        // 首个实例：series_id 写自身 id，后续实例继承同一个值。
+        // 这样「这条规则的所有实例」= WHERE series_id = ? 一条查询搞定
+        seriesId: repeatRule ? id : null,
         now: nowIso
       })
       if (input.tags && input.tags.length > 0) {
@@ -173,9 +186,97 @@ export class TaskService {
         },
         nowIso
       )
+
+      // §7：**完成时**才生成下一次（绝不预生成未来任务）。
+      // 与状态变更、replan 同处一个事务 —— 要么都成要么都不成。
+      const spawned =
+        nextStatus === 'completed' ? this.spawnNextOccurrence(existing, nowIso) : null
+
       this.replan(id)
+      // 新实例的提醒也要排上（§9：每周都要提醒）
+      if (spawned) this.replan(spawned.id)
+
       return this.repo.findById(id)
     })
+  }
+
+  /**
+   * 生成下一实例。返回新任务 id；不该生成 / 已存在时返回 null。
+   *
+   * 幂等三重保障（§14）：
+   *  1. 只从 `pending → completed` 方向进入（调用方保证），取消勾选不会再来一遍
+   *  2. `findBySeriesAndDueDate` 唯一性判断 —— 重启 / 唤醒 / 调度器 / 快速连点都会在这里被挡下
+   *  3. 全部写入在同一个 BEGIN IMMEDIATE 事务里，node-sqlite3-wasm 是同步 API，
+   *     不存在「两个生成逻辑交错」的窗口
+   *
+   * ⚠ 刻意不做的事：不改动被完成的那条老实例。它的 due_date / completed_at 原样保留，
+   * 所以「今日已完成」与「已完成」页里每次历史都完整（§8 / §13）。
+   */
+  private spawnNextOccurrence(existing: Task, nowIso: string): Task | null {
+    const rule = normalizeRule(existing.repeatRule)
+    if (!rule) return null
+
+    // 无截止日就没有「下一次」的基准。§4 的推进全部以 dueDate 为锚点
+    const nextDate = nextOccurrence(rule, existing.dueDate)
+    if (!nextDate) return null
+
+    const seriesId = existing.seriesId ?? existing.id
+    // 幂等防线：这一步挡住「重启后重跑生成逻辑」「快速连点两次完成」
+    if (this.repo.findBySeriesAndDueDate(seriesId, nextDate)) return null
+
+    const nextId = randomUUID()
+    this.repo.insert({
+      id: nextId,
+      title: existing.title,
+      note: existing.note,
+      priority: existing.priority,
+      dueDate: nextDate,
+      dueTime: existing.dueTime,
+      dueAtUtc: toUtcIso(nextDate, existing.dueTime),
+      reminderEnabled: existing.reminderEnabled,
+      reminderDays: existing.reminderDays,
+      reminderTime: existing.reminderTime,
+      notifyChannels: existing.notifyChannels,
+      // 规则带着「已发生次数 + 1」续下去，endType='count' 靠它收敛
+      repeatRule: bumpDoneCount(rule),
+      seriesId,
+      now: nowIso
+    })
+
+    // 标签继承：重复任务多半也需要同样的分类
+    if (existing.tags.length > 0) {
+      for (const tag of existing.tags) this.repo.linkTag(nextId, tag.id)
+    }
+
+    // 注意：这里**不**判断 nextDate 是不是今天。是不是「今日待完成」由
+    // board() 的 due_date <= todayKey 自然决定（§7：下一次不是今天就不提前进今日）
+    return this.repo.findById(nextId)
+  }
+
+  /**
+   * 把 UI / IPC 传来的规则收敛成合法值，并处理「基准日」关系。
+   *
+   * 两条规则：
+   *  - weekly 没给星期 → 用 dueDate 的星期（§4「每周按当前截止日的星期几」）
+   *  - 没有 dueDate 就不该有重复规则（没有推进锚点），降级为不重复
+   */
+  private prepareRule(raw: RepeatRule | null | undefined, dueDate: string | null): RepeatRule | null {
+    if (raw === null || raw === undefined) return null
+    const rule = normalizeRule(raw)
+    if (!rule) return null
+    if (!dueDate) return null
+
+    if (rule.freq === 'weekly') {
+      // §4「每周按当前截止日的星期几」。
+      // ⚠ 必须在 normalizeRule **之前**看原始 weekdays —— normalizeRule 会把
+      // 空数组兜底成 [1]（周一），先归一化就再也分不出「用户没选」和「用户选了周一」。
+      const rawWeekdays = (raw as Partial<RepeatRule>).weekdays
+      const given = Array.isArray(rawWeekdays)
+        ? rawWeekdays.filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+        : []
+      if (given.length === 0) return { ...rule, weekdays: [weekdayIndex(dueDate)] }
+    }
+    return rule
   }
 
   /**
@@ -219,6 +320,11 @@ export class TaskService {
         case 'todayDone':
           if (existing.status !== 'completed') {
             this.repo.update(id, { status: 'completed', completed_at: nowIso }, nowIso)
+            // 拖拽进「今日已完成」与勾选完成语义等价，重复任务同样要续下一次
+            const spawned = this.spawnNextOccurrence(existing, nowIso)
+            this.replan(id)
+            if (spawned) this.replan(spawned.id)
+            return this.repo.findById(id)
           }
           break
       }
@@ -264,6 +370,22 @@ export class TaskService {
       if (patch.reminderTime !== undefined) reminderFields.reminder_time = patch.reminderTime
       if (patch.notifyChannels !== undefined) reminderFields.notify_channels = patch.notifyChannels
       if (Object.keys(reminderFields).length > 0) this.repo.update(id, reminderFields, nowIso)
+
+      // 重复规则变更（§10：默认「修改当前实例及后续重复规则」）。
+      // 历史实例身上各自留着规则快照，所以这里改不到它们 —— 正是期望行为。
+      if (patch.repeatRule !== undefined) {
+        const nextRule = this.prepareRule(patch.repeatRule, nextDueDate)
+        this.repo.update(
+          id,
+          {
+            repeat_rule: serializeRule(nextRule),
+            // 从「不重复」变成「重复」时补上 series_id；取消重复时保留旧 series_id，
+            // 否则已生成的后继实例会失去串联系（历史不该被改写）
+            series_id: nextRule ? existing.seriesId ?? id : existing.seriesId
+          },
+          nowIso
+        )
+      }
 
       this.replan(id)
       return this.repo.findById(id)

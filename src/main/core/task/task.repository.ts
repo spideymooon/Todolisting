@@ -6,6 +6,7 @@
 import type { Db } from '../database/connection'
 import type { BoardColumn, NotifyChannel, Priority, Tag, TagColor, Task, TaskStatus } from '@shared/types'
 import { toDateKey } from '@shared/date'
+import { parseRule, serializeRule, type RepeatRule } from '@shared/repeat'
 
 interface TaskRow {
   id: string
@@ -24,6 +25,10 @@ interface TaskRow {
   sort_order: number
   created_at: string
   updated_at: string
+  /** 003_repeat 新增。JSON 字符串或 NULL */
+  repeat_rule: string | null
+  /** 001 预留、003 开始使用的重复系列 id */
+  series_id: string | null
 }
 
 interface TagRow {
@@ -66,6 +71,9 @@ function mapTask(row: TaskRow, tags: Tag[]): Task {
     sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    // 坏 JSON 在这里收敛成 null（= 不重复），绝不把异常抛给列表渲染
+    repeatRule: parseRule(row.repeat_rule),
+    seriesId: row.series_id ?? null,
     tags
   }
 }
@@ -112,6 +120,10 @@ export interface InsertTaskRow {
   reminderDays: number
   reminderTime: string
   notifyChannels: NotifyChannel
+  /** 重复规则。null = 不重复 */
+  repeatRule?: RepeatRule | null
+  /** 重复系列的串联 id。创建首个实例时传自身 id */
+  seriesId?: string | null
   now: string
 }
 
@@ -229,8 +241,8 @@ export class TaskRepository {
       `INSERT INTO tasks
          (id, title, note, status, priority, due_date, due_time, due_at_utc,
           reminder_enabled, reminder_days, reminder_time, notify_channels,
-          sort_order, is_template, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+          sort_order, is_template, series_id, repeat_rule, created_at, updated_at)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)`,
       [
         input.id,
         input.title,
@@ -243,6 +255,8 @@ export class TaskRepository {
         input.reminderDays,
         input.reminderTime,
         input.notifyChannels,
+        input.seriesId ?? null,
+        serializeRule(input.repeatRule),
         input.now,
         input.now
       ]
@@ -263,7 +277,9 @@ export class TaskRepository {
       'reminder_enabled',
       'reminder_days',
       'reminder_time',
-      'notify_channels'
+      'notify_channels',
+      'repeat_rule',
+      'series_id'
     ]
     const keys = Object.keys(fields).filter((k) => allowed.includes(k))
     if (keys.length === 0) return
@@ -273,6 +289,34 @@ export class TaskRepository {
       now,
       id
     ])
+  }
+
+  /**
+   * 同一重复系列里、某个 due_date 上是否已经有实例（含已完成、不含已删除）。
+   *
+   * 这是生成下一实例时的**幂等判断**（§14）：重启、系统唤醒、调度器重复触发、
+   * 快速连点完成 —— 任何一种情况下重跑生成逻辑，都会在这里被挡下来。
+   * 不用 UNIQUE 索引是因为「用户手动建一条同一天的任务」完全是合法的。
+   */
+  findBySeriesAndDueDate(seriesId: string, dueDate: string): Task | null {
+    const row = this.db.get(
+      `SELECT * FROM tasks
+        WHERE series_id = ? AND due_date = ? AND is_template = 0
+        LIMIT 1`,
+      [seriesId, dueDate]
+    ) as unknown as TaskRow | undefined
+    if (!row) return null
+    return this.attachTags([row])[0] ?? null
+  }
+
+  /** 某个系列的实例总数（含已完成）。endType='count' 收敛时会用到 */
+  countBySeries(seriesId: string): number {
+    const row = this.db.get(
+      `SELECT COUNT(*) AS n FROM tasks
+        WHERE series_id = ? AND is_template = 0`,
+      [seriesId]
+    ) as unknown as { n?: number } | undefined
+    return Number(row?.n ?? 0)
   }
 
   softDelete(id: string, now: string): void {
