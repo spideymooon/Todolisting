@@ -177,7 +177,7 @@ export function CaptureBar({
 
         {showJumpBack && (
           <button type="button" className="capture-jump" onClick={() => setPage('today')}>
-            去今天看看
+            去日历看看
           </button>
         )}
 

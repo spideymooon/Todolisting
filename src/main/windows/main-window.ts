@@ -1,10 +1,13 @@
 import { BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { IPC } from '@shared/types'
-// 品牌图标（scripts/todolist-256x256.png 的下游，gen-icons.mjs 装配产出）。
-// Windows 上 BrowserWindow 的 icon 同时决定：窗口图标 + 任务栏图标；
-// 打包成 exe 后任务栏改用 exe 内嵌图标（build/icon.ico），两者同源一致
-import appIcon from '../../../resources/icon.png?asset'
+import { brandIconPath } from '../system/brand-icon'
+
+function windowIconPath(): string {
+  // v1.5.1 教训：?asset 路径打包后失效导致窗口无图标、任务栏白板。
+  // 现在从 extraResources / 项目根 resources/ 取（见 brand-icon.ts）。
+  return brandIconPath('icon.png')
+}
 
 /**
  * 主窗口。
@@ -31,7 +34,7 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 720,
     show: false,
     frame: false,
-    icon: appIcon,
+    icon: windowIconPath(),
     backgroundColor: '#FAFAFA',
     autoHideMenuBar: true,
     title: 'TodoList',

@@ -68,11 +68,14 @@ export function TaskEditor({
   const createTask = useAppStore((s) => s.createTask)
   const remove = useAppStore((s) => s.remove)
   const settings = useAppStore((s) => s.settings)
+  // 仅新建模式消费：日历页「+ 添加任务」带来的默认截止日（选中日期 / 今天）
+  const creatorDefaultDate = useAppStore((s) => s.creatorDefaultDate)
 
   const [title, setTitle] = useState(task?.title ?? '')
   const [note, setNote] = useState(task?.note ?? '')
   const [priority, setPriority] = useState<Priority>(task?.priority ?? 3)
-  const [dueDate, setDueDate] = useState<string | null>(task?.dueDate ?? null)
+  // 编辑模式一律带回任务自己的日期（哪怕为 null）—— 默认值只对新建生效
+  const [dueDate, setDueDate] = useState<string | null>(task ? task.dueDate : creatorDefaultDate)
   const [dueTime, setDueTime] = useState(task?.dueTime ?? '')
   // 新建模式的提醒初值 = 全局默认（与主进程 create 的快照逻辑一致，预览才不会骗人）
   const [reminderEnabled, setReminderEnabled] = useState(

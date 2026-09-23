@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@renderer/shared/store/appStore'
-import type { WidgetStatus } from '@shared/types'
+import { WIDGET_SIZE_PRESETS, type WidgetStatus } from '@shared/types'
 import { WIDGET_SCOPE_OPTIONS } from '@renderer/widgets/widgetStore'
 
 /**
@@ -73,7 +73,9 @@ export function WidgetPage(): React.JSX.Element {
           <div>
             <div className="settings-label">窗口置顶</div>
             <div className="settings-desc">
-              一直浮在其他窗口之上。小组件头部的图钉按钮与这里是同一个开关
+              一直浮在其他窗口之上。小组件头部的图钉按钮与这里是同一个开关。
+              <br />
+              置顶时缩放会被锁定（避免误拖动边界），取消置顶即恢复
             </div>
           </div>
           <button
@@ -87,6 +89,37 @@ export function WidgetPage(): React.JSX.Element {
               )
             }
           />
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">窗口大小</div>
+            <div className="settings-desc">
+              {widget?.resizable === false
+                ? '已置顶，缩放被锁定。取消上方「窗口置顶」后可自由调整'
+                : `拖动小组件右下角可自由调整大小${
+                    widget ? `（当前 ${widget.width}×${widget.height}）` : ''
+                  }`}
+            </div>
+          </div>
+          <div className="seg">
+            {WIDGET_SIZE_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                disabled={!settings.widgetEnabled || widget?.resizable === false}
+                style={!settings.widgetEnabled || widget?.resizable === false ? { opacity: 0.4 } : undefined}
+                className={
+                  widget?.width === p.w && widget?.height === p.h ? 'is-active' : ''
+                }
+                onClick={() =>
+                  void window.api.widget.setSize(p.w, p.h).then((s) => setWidget(s))
+                }
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="settings-row">

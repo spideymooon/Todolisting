@@ -74,6 +74,8 @@ textarea {
   /* 无边框窗口全靠这块区域拖动；不加背景色，与主色融为一体 */
   -webkit-app-region: drag;
   user-select: none;
+  /* 窗口最大化/还原时 Electron 会发 'resize'，与小组件的缩放同步共用这一条通道。
+     主窗口自己不需要缩放手柄 —— 它的尺寸由系统缩放边框负责 */
 }
 
 .titlebar-drag {
@@ -426,6 +428,271 @@ textarea {
 
 .capture-hint.is-visible {
   opacity: 0.75;
+}
+
+/* ══ 日历页（月历视图） ═══════════════════════════════ */
+/* 黑/白/灰、细边框、轻圆角、克制 hover（《01-UI设计规范》§2）。
+   网格线用 1px gap 露底色的做法：不用每格四边写 border，七列的接缝永远 1px 不发虚 */
+
+.cal {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 20px 16px;
+  gap: 10px;
+}
+
+/* ── 顶部控制条：‹ 年月 › + 今天 ─────────────────────── */
+.cal-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-month-label {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin: 0 4px;
+}
+
+.cal-nav-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.cal-nav-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.cal-toolbar-spacer {
+  flex: 1;
+}
+
+.cal-today-btn {
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.cal-today-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+/* ── 星期表头 ───────────────────────────────────────── */
+.cal-weekdays {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.cal-weekday {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding-bottom: 6px;
+}
+
+/* ── 月网格 ─────────────────────────────────────────── */
+.cal-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  /* 行高：保底 72px（日期行 20 + 两条任务 36 + padding/gap 16 的最小完整内容），
+     之上随剩余高度均分（5 行月份比 6 行月份的格子更高，正好铺满）。
+     窗口太矮放不下保底行高时允许纵向滚动，格子内容永不裁切 */
+  grid-auto-rows: minmax(72px, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  overflow-y: auto;
+}
+
+.cal-cell {
+  background: var(--bg-app);
+  min-width: 0;
+  min-height: 60px;
+  padding: 5px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  cursor: pointer;
+  transition: background 100ms ease;
+  /* 兜底：格内容任何情况下都不允许溢出到邻格（格高由行数与窗口决定，内容只做减法） */
+  overflow: hidden;
+}
+
+.cal-cell:hover {
+  background: var(--bg-hover);
+}
+
+/* 上月 / 下月补位格：整体弱化，日期数字更淡 */
+.cal-cell.is-outside .cal-day-num {
+  color: var(--text-tertiary);
+  opacity: 0.6;
+}
+
+.cal-cell.is-outside .cal-task {
+  opacity: 0.62;
+}
+
+/* 日期行：数字在左、+N 在右，同一行不放任务条目 */
+.cal-cell-head {
+  flex: 0 0 auto;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 日期数字。「今天」用实心圆点（accent 底白字），与选中描边是两个独立标记 */
+.cal-day-num {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-cell.is-today .cal-day-num {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 选中格：内描边（不占布局空间，不会把内容挤动） */
+.cal-cell.is-selected {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+/* ── 格内任务条目 ───────────────────────────────────── */
+.cal-task {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--text-primary);
+  text-align: left;
+  transition: background 100ms ease;
+}
+
+.cal-task:hover {
+  background: var(--bg-surface);
+}
+
+.cal-task-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 状态点：普通=灰、逾期=红、已完成=绿。颜色全部来自现有 token */
+.cal-task-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.cal-task.is-overdue .cal-task-dot {
+  background: var(--due-overdue);
+}
+
+.cal-task.is-overdue .cal-task-title {
+  color: var(--due-overdue);
+}
+
+.cal-task.is-done {
+  color: var(--text-tertiary);
+}
+
+.cal-task.is-done .cal-task-dot {
+  background: var(--due-done);
+}
+
+.cal-task.is-done .cal-task-title {
+  text-decoration: line-through;
+}
+
+.cal-task .remind-dot {
+  flex: 0 0 auto;
+}
+
+/* +N：折叠计数，与日期数字同行。点击选中该格，全部任务在下方列表里看 */
+.cal-more {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 3px;
+  color: var(--text-tertiary);
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-more:hover {
+  color: var(--accent);
+  background: var(--bg-surface);
+}
+
+/* ── 选中日期的任务列表 ─────────────────────────────── */
+.cal-day-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cal-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 4px 6px;
+}
+
+.cal-day-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cal-day-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* 固定可视高度：约 4 行任务。再多内部滚动，绝不挤压上面的月历 */
+.cal-day-list {
+  max-height: 152px;
+  overflow-y: auto;
 }
 
 /* ══ 看板 ════════════════════════════════════════════ */

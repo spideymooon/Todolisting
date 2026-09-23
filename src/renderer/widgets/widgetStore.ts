@@ -42,12 +42,22 @@ interface WidgetState {
   ready: boolean
   /** 最近完成的任务 id，用于让勾选动画播完再消失 */
   justDoneId: string | null
+  /**
+   * 当前是否允许缩放。由主进程推送（widgetResizeState 广播 + 初始化查询），
+   * **不在渲染层自己算** —— 置顶那一下是主进程 setResizable 关掉的，
+   * 渲染层只需要照着显示。
+   */
+  resizable: boolean
+  /** 缩放被锁定的原因；null = 未锁定。用于给出「取消置顶后可缩放」的提示文案 */
+  resizeLockedBy: 'alwaysOnTop' | null
+  /** 拖拽手柄期间置 true：临时关掉 -webkit-app-region，见 WidgetApp 的说明 */
+  resizing: boolean
 
   load: () => Promise<void>
   refresh: () => Promise<void>
   toggle: (id: string) => Promise<void>
   capture: (raw: string, target: CaptureTarget) => Promise<boolean>
-  /** 头部图钉开关：切小组件窗口的置顶 */
+  /** 头部图钉开关：切小组件窗口的置顶（顺带锁定/解锁缩放） */
   setPinned: (on: boolean) => Promise<void>
   /** 头部 ✕：直接关掉小组件（写 widgetEnabled=false，主进程销毁窗口） */
   hide: () => Promise<void>
@@ -55,6 +65,10 @@ interface WidgetState {
   setScope: (scope: WidgetScope) => Promise<void>
   openMain: (taskId?: string) => Promise<void>
   clearJustDone: () => void
+  /** 拖拽右下角手柄期间切换 */
+  setResizing: (on: boolean) => void
+  /** 拖动结束 → 上报新尺寸落库 */
+  commitSize: () => Promise<void>
 }
 
 export const useWidgetStore = create<WidgetState>((set, get) => ({
@@ -62,12 +76,25 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   ready: false,
   justDoneId: null,
+  // 初值给 true 而不是 false：置顶状态要先问主进程才知道，若初值 false，
+  // 非置顶用户的第一次渲染会看到一个闪一下的禁用手柄
+  resizable: true,
+  resizeLockedBy: null,
+  resizing: false,
 
   load: async () => {
     // scope 跟随设置（默认 all = 所有未完成任务），所以必须先拿 settings 再取数
     const settings = await window.api.settings.get()
     const tasks = await window.api.task.list(widgetScopeOf(settings))
-    set({ settings, tasks, ready: true })
+    // 缩放的初始可用性要问主进程：置顶状态可能来自设置页而不是小组件上的图钉
+    const resize = await window.api.widget.resizeState()
+    set({
+      settings,
+      tasks,
+      ready: true,
+      resizable: resize.resizable,
+      resizeLockedBy: resize.lockedBy
+    })
   },
 
   refresh: async () => {
@@ -97,10 +124,15 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   },
 
   setPinned: async (on) => {
-    // 主进程会同时写设置 + setAlwaysOnTop；返回值是落库后的真实状态，
-    // 用它回填本地，避免「点了很多下之后图标状态与实际不一致」
+    // 主进程会同时写设置 + setAlwaysOnTop + setResizable(!on)；返回值是落库后的真实状态，
+    // 用它回填本地，避免「点了很多下之后图标状态与实际不一致」。
+    // resizable 必须跟着回填：置顶锁定缩放这件事的真相在主进程
     const status = await window.api.widget.setAlwaysOnTop(on)
-    set({ settings: { ...get().settings, widgetAlwaysOnTop: status.alwaysOnTop } })
+    set({
+      settings: { ...get().settings, widgetAlwaysOnTop: status.alwaysOnTop },
+      resizable: status.resizable,
+      resizeLockedBy: status.resizeLockedBy
+    })
   },
 
   hide: async () => {
@@ -120,5 +152,20 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
     await window.api.widget.openMain(taskId ?? null)
   },
 
-  clearJustDone: () => set({ justDoneId: null })
+  clearJustDone: () => set({ justDoneId: null }),
+
+  setResizing: (on) => set({ resizing: on }),
+
+  commitSize: async () => {
+    set({ resizing: false })
+    // 不传渲染层量到的宽高：resizeTo 之后同步读 innerWidth 拿到的是**旧值**
+    //（探针实测：拖到 520×540，同步读仍是 420×420，落库就被旧值覆盖了）。
+    // 主进程在收到这条 IPC 时自己读窗口实际大小 —— 那时 resize 一定已经生效
+    const status = await window.api.widget.resize()
+    set({
+      settings: { ...get().settings, widgetW: status.width, widgetH: status.height },
+      resizable: status.resizable,
+      resizeLockedBy: status.resizeLockedBy
+    })
+  }
 }))

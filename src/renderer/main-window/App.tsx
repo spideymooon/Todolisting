@@ -5,7 +5,7 @@ import { TitleBar } from './TitleBar'
 import { Header } from './Header'
 import { CaptureBar } from './CaptureBar'
 import { BoardPage } from './pages/BoardPage'
-import { TodayPage } from './pages/TodayPage'
+import { CalendarPage } from './pages/CalendarPage'
 import { UpcomingPage } from './pages/UpcomingPage'
 import { AllTasksPage } from './pages/AllTasksPage'
 import { CompletedPage } from './pages/CompletedPage'
@@ -173,7 +173,7 @@ export function App(): React.JSX.Element {
           )}
 
           <div className="page-body">
-            {page === 'today' && <TodayPage />}
+            {page === 'today' && <CalendarPage />}
             {page === 'board' && <BoardPage />}
             {page === 'upcoming' && <UpcomingPage />}
             {page === 'all' && <AllTasksPage />}

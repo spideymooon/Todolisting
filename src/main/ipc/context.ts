@@ -21,10 +21,15 @@ export interface AppContext {
    */
   openAndLocate: (taskId: string | null) => void
 
-  /** 小组件状态（开关 / 可见性 / 置顶） */
+  /** 小组件状态（开关 / 可见性 / 置顶 / 缩放可用性 / 尺寸） */
   widgetStatus: () => WidgetStatus
-  /** 设置变更后重建或销毁小组件窗口，并同步置顶与可见性 */
+  /** 设置变更后重建或销毁小组件窗口，并同步置顶、缩放可用性与可见性 */
   syncWidgetWindow: () => void
+  /**
+   * 把小组件尺寸改成指定值（设置页的预置档位）。
+   * 缩放被锁定（置顶）时静默忽略 —— 锁定的语义由主进程说了算。
+   */
+  setWidgetSize: (w: number, h: number) => void
   /** PushPlus 通道自检（设置页「测试连接」） */
   pushplusCheck: () => Promise<PushPlusCheck>
 }

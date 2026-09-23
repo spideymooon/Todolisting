@@ -45,9 +45,21 @@ interface AppState {
   error: string | null
   /** 左侧 Sidebar 是否展开（标题栏第一个按钮控制）。收起时内容区自动扩展 */
   sidebarOpen: boolean
+  /**
+   * 「日历」页当前选中的日期（YYYY-MM-DD）。null = 尚未选中。
+   *
+   * 放 store 而不是页面内部 state，是因为有两处页面外的消费方：
+   *  - Header 副标题跟随选中日期
+   *  - Header 的「+ 添加任务」把选中日期作为新任务的默认截止日传入编辑器
+   */
+  calendarSelected: string | null
+  /** 打开「新建任务」时预填的截止日期。只被 TaskEditor 新建模式消费一次（closeEditor 时清掉） */
+  creatorDefaultDate: string | null
 
   setPage: (page: PageKey) => void
   toggleSidebar: () => void
+  /** 日历页选中某日期（格空白处单击） */
+  setCalendarSelected: (key: string) => void
   refresh: () => Promise<void>
   capture: (raw: string, target: CaptureTarget) => Promise<CaptureResult>
   createTask: (input: CreateTaskInput) => Promise<Task | null>
@@ -61,7 +73,11 @@ interface AppState {
   clearFlash: () => void
 
   openEditor: (task: Task) => void
-  openCreator: () => void
+  /**
+   * 打开「新建任务」。defaultDueDate：预填的截止日期 ——
+   * 日历页传入选中日期（无选中则今天），其他页面不传（保持「无日期」原行为）。
+   */
+  openCreator: (defaultDueDate?: string | null) => void
   closeEditor: () => void
   /** 打开「全部任务」页并定位到该任务 */
   locate: (taskId: string) => void
@@ -83,6 +99,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   locateNonce: 0,
   error: null,
   sidebarOpen: true,
+  calendarSelected: null,
+  creatorDefaultDate: null,
 
   setPage: (page) => set({ page }),
 
@@ -163,9 +181,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   openEditor: (task) => set({ editing: task, creating: false }),
 
-  openCreator: () => set({ creating: true, editing: null }),
+  openCreator: (defaultDueDate) =>
+    set({ creating: true, editing: null, creatorDefaultDate: defaultDueDate ?? null }),
 
-  closeEditor: () => set({ editing: null, creating: false }),
+  closeEditor: () => set({ editing: null, creating: false, creatorDefaultDate: null }),
+
+  /** 日历页选中日期。只能选中真实存在的日期（YYYY-MM-DD） */
+  setCalendarSelected: (key) => set({ calendarSelected: key }),
 
   locate: (taskId) =>
     set({

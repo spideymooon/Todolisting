@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/types'
 import type { TodoApi, ListScope } from '@shared/api'
 import type { CaptureTarget } from '@shared/capture-parse'
-import type { AppSettings, CreateTaskInput, MoveTarget, TaskPatch, WindowState } from '@shared/types'
+import type { AppSettings, CreateTaskInput, MoveTarget, TaskPatch, WindowResizedEvent, WindowState } from '@shared/types'
 
 /**
  * 渲染层唯一的对外通道。
@@ -40,6 +40,12 @@ const api: TodoApi = {
     status: () => ipcRenderer.invoke(IPC.widgetStatus),
     setEnabled: (enabled: boolean) => ipcRenderer.invoke(IPC.widgetSetEnabled, enabled),
     setAlwaysOnTop: (on: boolean) => ipcRenderer.invoke(IPC.widgetSetAlwaysOnTop, on),
+    /** 拖动右下角手柄结束后提交当前尺寸（主进程自己读窗口实际大小） */
+    resize: () => ipcRenderer.invoke(IPC.widgetResized),
+    /** 按预置档位改尺寸（主窗口设置页用） */
+    setSize: (w: number, h: number) => ipcRenderer.invoke(IPC.widgetSetSize, w, h),
+    /** 问一次当前能不能缩放（小组件初始化手柄禁用态） */
+    resizeState: () => ipcRenderer.invoke(IPC.widgetResizeState),
     openMain: (taskId: string | null) => ipcRenderer.invoke(IPC.widgetOpenMain, taskId)
   },
   pushplus: {
@@ -82,6 +88,13 @@ const api: TodoApi = {
       ipcRenderer.on(IPC.windowState, listener)
       return () => {
         ipcRenderer.removeListener(IPC.windowState, listener)
+      }
+    },
+    widgetResizeState: (cb: (state: WindowResizedEvent) => void) => {
+      const listener = (_e: unknown, state: WindowResizedEvent): void => cb(state)
+      ipcRenderer.on(IPC.widgetResizeState, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.widgetResizeState, listener)
       }
     }
   }

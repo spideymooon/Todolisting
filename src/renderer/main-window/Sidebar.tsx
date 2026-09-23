@@ -8,7 +8,7 @@ interface NavDef {
 }
 
 const NAV: NavDef[] = [
-  { key: 'today', icon: 'calendar', label: '今天' },
+  { key: 'today', icon: 'calendar', label: '日历' },
   { key: 'board', icon: 'board', label: '看板' },
   { key: 'upcoming', icon: 'clock', label: '待办任务' },
   { key: 'all', icon: 'list', label: '全部任务' },

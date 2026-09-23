@@ -17,6 +17,7 @@ import type {
   TaskPatch,
   TestNotifyResult,
   WidgetStatus,
+  WindowResizedEvent,
   WindowState
 } from './types'
 
@@ -74,10 +75,20 @@ export interface TodoApi {
     retry(logId: string): Promise<boolean>
   }
   widget: {
-    /** 小组件的开关 / 可见性 / 置顶状态 */
+    /** 小组件的开关 / 可见性 / 置顶 / 缩放可用性 / 当前尺寸 */
     status(): Promise<WidgetStatus>
     setEnabled(enabled: boolean): Promise<WidgetStatus>
     setAlwaysOnTop(on: boolean): Promise<WidgetStatus>
+    /**
+     * 小组件窗口拖动右下角手柄结束后提交尺寸。
+     * **不要传渲染层量到的宽高**（innerWidth 在 resizeTo 后是旧值）——
+     * 主进程自己读窗口实际大小落库。置顶（缩放被锁定）时直接忽略。
+     */
+    resize(): Promise<WidgetStatus>
+    /** 按预置档位改尺寸（主窗口「小组件」页的尺寸分段控件） */
+    setSize(w: number, h: number): Promise<WidgetStatus>
+    /** 查询当前缩放可用性（小组件初始化手柄禁用态） */
+    resizeState(): Promise<WindowResizedEvent>
     /** 小组件窗口点击任务时调用：显示主窗口并定位（taskId 为 null 则只显示） */
     openMain(taskId: string | null): Promise<void>
   }
@@ -101,5 +112,7 @@ export interface TodoApi {
     locateTask(cb: (taskId: string) => void): () => void
     /** 无边框窗口的最大化状态变化（自绘标题栏切换图标） */
     windowState(cb: (state: WindowState) => void): () => void
+    /** 小组件缩放可用性变化（置顶时被锁定 → 手柄变禁用态） */
+    widgetResizeState(cb: (state: WindowResizedEvent) => void): () => void
   }
 }

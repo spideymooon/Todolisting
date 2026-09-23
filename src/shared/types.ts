@@ -192,11 +192,36 @@ export interface WidgetStatus {
   /** 窗口当前是否真的开着 */
   visible: boolean
   alwaysOnTop: boolean
+  /**
+   * 当前是否允许用右下角手柄缩放。
+   *
+   * ⚠ 这是**窗口的真实能力**（win.isResizable()），不是设置值的镜像：
+   * Windows 上 resizable:false 出生的 frameless 窗口，setResizable(true) 改不动它。
+   */
+  resizable: boolean
+  /** 缩放被锁定的原因；null = 未锁定 */
+  resizeLockedBy: 'alwaysOnTop' | null
+  /** 窗口的实际宽高（窗口未开时回落为记忆值） */
+  width: number
+  height: number
 }
 
 /** 无边框主窗口的窗口状态（自绘标题栏按钮图标用） */
 export interface WindowState {
   maximized: boolean
+}
+
+/**
+ * 小组件尺寸变化的广播载荷。
+ *
+ * 为什么要广播：窗口的 resizable 在置顶时会由主进程**强制锁死**（需求：
+ * 「点了置顶就锁定缩放功能」）。渲染层需要据此把右下角的缩放手柄变成禁用态，
+ * 否则用户会对着一个拖不动的角标反复较劲。
+ */
+export interface WindowResizedEvent {
+  resizable: boolean
+  /** 锁定的原因。目前只有「置顶」一种；null = 未被锁定 */
+  lockedBy: 'alwaysOnTop' | null
 }
 
 /** 一次调度 tick 的结果 */
@@ -247,6 +272,17 @@ export interface AppSettings {
   /** 小组件位置记忆。null = 用默认位置（右下角） */
   widgetX: number | null
   widgetY: number | null
+  /**
+   * 小组件尺寸记忆。默认 300×420。
+   *
+   * 与 widgetX/widgetY 同理：**尺寸必须存在设置里而不是内存里** ——
+   * 主进程要在创建窗口时就拿到宽高，否则会先按默认尺寸画一帧再跳到用户尺寸（闪一下）。
+   * 拖动右下角手柄结束后才写库（拖拽过程会高频触发 resize）。
+   *
+   * ⚠ 置顶（widgetAlwaysOnTop）时缩放被锁定，但已记住的尺寸仍然照用。
+   */
+  widgetW: number
+  widgetH: number
   /** 小组件背景不透明度（0-100，百分比）。默认 86 —— 全透明看不清，不透明又太实 */
   widgetOpacity: number
   /**
@@ -289,6 +325,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   widgetAlwaysOnTop: false,
   widgetX: null,
   widgetY: null,
+  widgetW: 300,
+  widgetH: 420,
   widgetOpacity: 86,
   widgetScope: 'all',
 
@@ -298,6 +336,52 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 /** §4 给出的可选提前天数。用户可以填自定义值，这里只是设置的快捷项 */
 export const REMINDER_DAY_PRESETS = [0, 1, 2, 3, 7] as const
+
+/**
+ * 小组件尺寸的可选档位（主窗口「小组件」页的尺寸分段控件）。
+ *
+ * 为什么给「档位」而不是让用户填数字：桌面挂件的可用尺寸就那么几档，
+ * 档位既好点、又天然保证每个尺寸下布局都不会塌。
+ * 用户用右下角手柄自由缩放后不落在任何档位上 —— 此时分段控件全部不选中，
+ * 显示「自定义」，不做吸附（强行吸附会让精细调整变得不可能）。
+ */
+export const WIDGET_SIZE_PRESETS: ReadonlyArray<{ label: string; w: number; h: number }> = [
+  { label: '紧凑', w: 240, h: 320 },
+  { label: '标准', w: 300, h: 420 },
+  { label: '宽', w: 420, h: 420 },
+  { label: '大', w: 480, h: 560 }
+]
+
+/**
+ * 小组件尺寸下限。**不是拍脑袋**：240×280 是「标题栏 + 输入框 + 一行任务」
+ * 能正常排布的最小尺寸，再小头部按钮就会挤成一团。
+ * 与 BrowserWindow 的 setMinimumSize 共用同一组常量，避免两处漂移。
+ */
+export const WIDGET_MIN_W = 240
+export const WIDGET_MIN_H = 280
+
+/** 尺寸上限。再大就不像桌面挂件了，也避免用户拖出屏幕 */
+export const WIDGET_MAX_W = 900
+export const WIDGET_MAX_H = 1000
+
+/**
+ * 把任意（可能来自旧版本、手改数据库、或极端拖拽的）宽高夹到合法区间。
+ * 主进程创建窗口与写库前都过一遍，保证存进去的永远是可用值。
+ */
+export function clampWidgetSize(w: number, h: number): { w: number; h: number } {
+  const clamp = (v: number, min: number, max: number): number =>
+    Math.min(max, Math.max(min, Math.round(Number.isFinite(v) ? v : min)))
+  return { w: clamp(w, WIDGET_MIN_W, WIDGET_MAX_W), h: clamp(h, WIDGET_MIN_H, WIDGET_MAX_H) }
+}
+
+/**
+ * 尺寸是否正好落在某个档位上（容差 2px：自由缩放很难精确命中）。
+ * 设置页用它决定分段控件高亮哪一项。
+ */
+export function matchWidgetSizePreset(w: number, h: number): string | null {
+  const hit = WIDGET_SIZE_PRESETS.find((p) => Math.abs(p.w - w) <= 2 && Math.abs(p.h - h) <= 2)
+  return hit ? hit.label : null
+}
 
 /** IPC 通道名集中在此，主进程与 preload 都从这里引，避免拼错 */
 export const IPC = {
@@ -346,6 +430,12 @@ export const IPC = {
   widgetSetAlwaysOnTop: 'widget:setAlwaysOnTop',
   /** 小组件窗口 → 主进程：报告新位置以便记忆 */
   widgetMoved: 'widget:moved',
+  /** 小组件窗口 → 主进程：报告新尺寸以便记忆（拖动右下角手柄结束后） */
+  widgetResized: 'widget:resized',
+  /** 主进程 → 小组件：缩放可用性变化（置顶时被锁定，手柄要变成禁用态） */
+  widgetResizeState: 'widget:resizeState',
+  /** 小组件窗口 → 主进程：请求把窗口缩到某个档位（预置尺寸分段控件，非必需但保持对称） */
+  widgetSetSize: 'widget:setSize',
   /** 主进程 → 小组件：数据变化的刷新信号（复用全窗口广播） */
   widgetOpenMain: 'widget:openMain',
 

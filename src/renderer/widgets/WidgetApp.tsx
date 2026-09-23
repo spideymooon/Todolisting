@@ -36,6 +36,14 @@ const SCOPE_TEXT: Record<WidgetScope, { title: string; empty: string }> = {
 /** 默认折叠状态：所有组都展开。折叠状态只在本次会话内有效（组件级 state） */
 const COLLAPSE_KEY = 'todolet.widget.collapsed'
 
+/**
+ * 缩放下限的渲染层镜像。主进程也有一份（setMinimumSize），两处都要有：
+ * 渲染层这份是为了让鼠标拖拽时**当场**就停在边界上，不然会是「拖过头 → 系统钳回」
+ * 那种一顿一顿的手感。
+ */
+const MIN_W = 240
+const MIN_H = 280
+
 export function WidgetApp(): React.JSX.Element {
   const tasks = useWidgetStore((s) => s.tasks)
   const ready = useWidgetStore((s) => s.ready)
@@ -50,9 +58,23 @@ export function WidgetApp(): React.JSX.Element {
   const openMain = useWidgetStore((s) => s.openMain)
   const clearJustDone = useWidgetStore((s) => s.clearJustDone)
   const setScope = useWidgetStore((s) => s.setScope)
+  const resizable = useWidgetStore((s) => s.resizable)
+  const resizing = useWidgetStore((s) => s.resizing)
+  const resizeLockedBy = useWidgetStore((s) => s.resizeLockedBy)
+  const setResizing = useWidgetStore((s) => s.setResizing)
+  const commitSize = useWidgetStore((s) => s.commitSize)
   const pinned = settings.widgetAlwaysOnTop
 
   const [menuOpen, setMenuOpen] = useState(false)
+  /** 置顶而缩放被锁时，给一次性的文字提示（见下方 showLockHint） */
+  const [lockHint, setLockHint] = useState(false)
+  const lockHintTimer = useRef<number | null>(null)
+
+  const showLockHint = (): void => {
+    setLockHint(true)
+    if (lockHintTimer.current !== null) window.clearTimeout(lockHintTimer.current)
+    lockHintTimer.current = window.setTimeout(() => setLockHint(false), 2600)
+  }
 
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try {
@@ -78,6 +100,68 @@ export function WidgetApp(): React.JSX.Element {
       window.removeEventListener('focus', onFocus)
     }
   }, [load, refresh])
+
+  // 主进程推送缩放可用性：置顶 → 锁定，取消置顶 → 解锁。
+  // 托盘菜单、设置页开关也能改置顶，所以这条广播是唯一可靠的来源
+  useEffect(() => {
+    return window.api.on.widgetResizeState((state) => {
+      useWidgetStore.setState({ resizable: state.resizable, resizeLockedBy: state.lockedBy })
+    })
+  }, [])
+
+  /**
+   * 右下角缩放手柄的拖拽逻辑。
+   *
+   * 为什么自绘而不用 Window 的原生缩放边框：小组件是 `frame: false` + `transparent`
+   * 的窗口，Windows 上根本不会画出可拖的缩放边框（`thickFrame: false` 已经关掉）。
+   * 所以必须自己在右下角放一块热点，按住时按鼠标位移改窗口大小。
+   *
+   * ⚠ 三个平台细节，缺一个都会有 bug：
+   *  1. 必须临时把 `-webkit-app-region` 从 drag 改成 no-drag（store 里的 resizing 标志）。
+   *     否则鼠标一进入头部拖拽区，整个窗口就变成「被系统拖着走」，`pointermove` 还会
+   *     被 Chromium 吞掉 —— 表现就是「拖动时窗口乱跳，尺寸不变」。
+   *  2. 用 `setPointerCapture`：不捕获的话鼠标滑出 8×8 的手柄就收不到事件，
+   *     拖到一半会「断手」
+   *  3. 用 `window.resizeTo` 而不是自己 `setBounds`：resizeTo 走的是窗口系统的
+   *     标准路径，DPI 缩放、最小尺寸钳制、多屏边界都由系统处理
+   */
+  const onHandleDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!resizable) {
+      showLockHint()
+      return
+    }
+    e.preventDefault()
+    e.stopPropagation()
+    const el = e.currentTarget
+    const startX = e.screenX
+    const startY = e.screenY
+    const startW = window.innerWidth
+    const startH = window.innerHeight
+    // setPointerCapture 在合成指针（自动化测试/触摸边缘场景）上会抛 NotFoundError，
+    // 真实鼠标不会 —— 但一旦抛错，后面的监听就挂不上了。包一层，失败就退化为
+    // 「只在手柄上拖」，功能仍然可用
+    try {
+      el.setPointerCapture(e.pointerId)
+    } catch {
+      // 忽略，见上
+    }
+    setResizing(true)
+
+    const onMove = (ev: PointerEvent): void => {
+      const w = Math.max(MIN_W, startW + (ev.screenX - startX))
+      const h = Math.max(MIN_H, startH + (ev.screenY - startY))
+      window.resizeTo(w, h)
+    }
+    const onUp = (): void => {
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onUp)
+      void commitSize()
+    }
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onUp)
+  }
 
   useEffect(() => {
     if (!justDoneId) return
@@ -201,7 +285,7 @@ export function WidgetApp(): React.JSX.Element {
 
   return (
     <div
-      className="wg"
+      className={`wg${pinned ? ' is-pinned' : ''}${resizing ? ' is-resizing' : ''}`}
       style={{ background: `rgba(28, 29, 33, ${(settings.widgetOpacity ?? 86) / 100})` }}
     >
       {/* 拖拽区。透明窗口没有标题栏，必须给一块明确的「把手」，
@@ -442,6 +526,45 @@ export function WidgetApp(): React.JSX.Element {
       {settings.widgetAlwaysOnTop && (
         <div className="wg-foot">
           点击任务打开主窗口 · 输入框回车即记录
+        </div>
+      )}
+
+      {/* 右下角缩放手柄。禁用态（置顶锁定）仍然渲染 —— 只是变成「点一下给提示」，
+          直接隐藏的话用户只会以为这版没有缩放功能 */}
+      <div
+        className={`wg-resize${resizable ? '' : ' is-locked'}`}
+        role="separator"
+        aria-label={resizable ? '拖动调整小组件大小' : '已置顶，缩放被锁定'}
+        title={resizable ? '拖动调整大小' : '已置顶，缩放已锁定'}
+        onPointerDown={onHandleDown}
+      >
+        {!resizable && (
+          <svg width="9" height="9" viewBox="0 0 12 12" aria-hidden="true">
+            <path
+              d="M4 8V4.6a1.3 1.3 0 0 1 2.6 0V8M4 5.6h2.6M4 8h2.6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <rect
+              x="2.4"
+              y="7.2"
+              width="5.8"
+              height="4"
+              rx="1.1"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+            />
+          </svg>
+        )}
+      </div>
+
+      {lockHint && (
+        <div className="wg-lock-hint">
+          {resizeLockedBy === 'alwaysOnTop' ? '已置顶，缩放已锁定 · 取消置顶后可用' : '当前不可缩放'}
         </div>
       )}
     </div>

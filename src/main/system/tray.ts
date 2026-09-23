@@ -11,11 +11,11 @@
 
 import { app, Menu, nativeImage, Tray, type BrowserWindow } from 'electron'
 import { readFileSync } from 'node:fs'
-// 品牌图标（唯一源 scripts/todolist-{16,32}x*.png，gen-icons.mjs 装配产出）。
-// 托盘直接用**逐档手工像素**的 16/32 两档，不再从大图缩放 ——
-// 源图是为小尺寸专门对过像素的，任何运行时重采样都会把锯齿带回来
-import trayIcon16 from '../../../resources/icon-16.png?asset'
-import trayIcon32 from '../../../resources/icon-32.png?asset'
+import { brandIconPath } from './brand-icon'
+
+function trayIcon(name: string): string {
+  return brandIconPath(name)
+}
 
 export interface TrayCallbacks {
   /** 显示并聚焦主窗口 */
@@ -54,8 +54,10 @@ export class TrayService {
     if (this.tray) return
 
     const icon = nativeImage.createEmpty()
-    icon.addRepresentation({ scaleFactor: 1, buffer: readFileSync(trayIcon16) })
-    icon.addRepresentation({ scaleFactor: 2, buffer: readFileSync(trayIcon32) })
+    // v1.5.1 教训：这里的 readFileSync 在打包后曾指向 asar 内部不存在的路径而抛
+    // ENOENT，炸掉整个启动回调。现在走 extraResources 的松散文件（见 brand-icon.ts）。
+    icon.addRepresentation({ scaleFactor: 1, buffer: readFileSync(trayIcon('icon-16.png')) })
+    icon.addRepresentation({ scaleFactor: 2, buffer: readFileSync(trayIcon('icon-32.png')) })
     const finalIcon = icon.isEmpty()
       ? // 防线：路径在 dev/打包后失效时不能让托盘变白块 —— 回退旧的内联图
         nativeImage.createFromDataURL(FALLBACK_PNG_DATA_URL)
@@ -131,7 +133,15 @@ export function applyLaunchAtLogin(enabled: boolean): void {
       openAtLogin: enabled,
       ...(app.isPackaged ? {} : { args: [process.cwd()] })
     })
-  } catch {
-    // 某些受限环境下写注册表会失败，不该因为它让设置页报错
+    // 回读确认 —— v1.5.1 用户报「开机不自启」，静默失败让这种问题无从排查。
+    // 现在安装版启动日志（stderr）里能看到注册表写入后的实际状态与 exe 路径，
+    // 若路径不对（比如曾用 win-unpacked 测试后目录变了）一眼可辨。
+    const actual = app.getLoginItemSettings()
+    console.log(
+      `[login] 期望 openAtLogin=${enabled} → 实际=${actual.openAtLogin}，exe=${process.execPath}`
+    )
+  } catch (err) {
+    // 某些受限环境下写注册表会失败，不该因为它让设置页报错 —— 但必须留痕
+    console.error('[login] 写入开机启动失败', err)
   }
 }

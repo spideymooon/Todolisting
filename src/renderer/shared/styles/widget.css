@@ -36,6 +36,8 @@ body {
   flex-direction: column;
   border-radius: 14px;
   overflow: hidden;
+  /* 缩放手柄与锁定提示要相对窗口定位 */
+  position: relative;
 
   /* 深色玻璃：rgba 而不是纯色，让桌面壁纸透一点出来 */
   background: rgba(28, 29, 33, 0.86);
@@ -456,4 +458,79 @@ body {
   font-size: 10.5px;
   color: rgba(255, 255, 255, 0.26);
   text-align: center;
+}
+
+/* ── 右下角缩放手柄（v1.6）───────────────────────────────────────────────
+ *
+ * 为什么自绘：小组件是 frameless + transparent 窗口，Windows 上不会画出
+ * 原生缩放边框（thickFrame 也已关掉），所以必须自己放一块热点。
+ *
+ * 尺寸 14×14 是折中：再小不好点，再大会吃掉任务行的点击区。
+ * 位置用 absolute 而不是放进 flex 流 —— 它在视觉上属于「窗口装饰」，
+ * 不该参与 .wg 的纵向布局，也不该顶掉 .wg-foot 的居中。
+ */
+.wg-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  z-index: 20;
+  /* ⚠ 手柄必须显式退出拖拽区。拖动过程中 store 里还会把整个 .wg 的
+     app-region 临时清空（.wg.is-resizing），双保险：只靠临时清空的话，
+     鼠标按下到 state 生效之间那一帧仍会被系统判成「拖窗口」 */
+  -webkit-app-region: no-drag;
+  cursor: nwse-resize;
+  border-bottom-right-radius: 13px;
+  /* 三条斜线：不用图片，用 background 渐变画，天然跟随缩放 */
+  background-image: linear-gradient(135deg, transparent 46%, rgba(255, 255, 255, 0.28) 47%, rgba(255, 255, 255, 0.28) 53%, transparent 54%);
+  opacity: 0.5;
+  transition: opacity 0.14s;
+}
+
+.wg:hover .wg-resize {
+  opacity: 0.85;
+}
+
+/* 置顶锁定：斜线换成小锁图标，光标改成「不允许」，一眼看出点不动 */
+.wg-resize.is-locked {
+  background-image: none;
+  cursor: not-allowed;
+  opacity: 0.42;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.wg-resize.is-locked:hover {
+  opacity: 0.8;
+}
+
+/* 拖动期间整个窗口退出系统拖拽区。见 WidgetApp 里 onHandleDown 的第 1 条说明 */
+.wg.is-resizing,
+.wg.is-resizing .wg-head {
+  -webkit-app-region: no-drag;
+}
+
+/* 拖动期间禁掉过渡：否则列表里的 hover/缩放动画会跟着鼠标抖动 */
+.wg.is-resizing * {
+  transition: none !important;
+}
+
+/* 锁定提示气泡：点禁用态手柄时出现，2.6s 后自动消失 */
+.wg-lock-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  z-index: 25;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(20, 21, 24, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10.5px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }

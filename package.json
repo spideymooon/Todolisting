@@ -1,6 +1,6 @@
 {
   "name": "desktop-todo",
-  "version": "1.5.1",
+  "version": "2.0.0",
   "description": "极简桌面 TodoList",
   "main": "./out/main/index.js",
   "author": "TodoList",
@@ -22,6 +22,12 @@
     },
     "files": [
       "out/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "."
+      }
     ],
     "asarUnpack": [
       "**/node_modules/node-sqlite3-wasm/**"

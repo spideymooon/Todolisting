@@ -1,6 +1,14 @@
 import { BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { dirname, resolve } from 'path'
-import { IPC, type AppSettings, type CreateTaskInput, type MoveTarget, type TaskPatch } from '@shared/types'
+import {
+  clampWidgetSize,
+  IPC,
+  type AppSettings,
+  type CreateTaskInput,
+  type MoveTarget,
+  type TaskPatch,
+  type WindowResizedEvent
+} from '@shared/types'
 import type { CaptureTarget } from '@shared/capture-parse'
 import type { AppContext } from './context'
 import type { ListScope } from '../core/task/task.service'
@@ -133,9 +141,41 @@ export function registerIpc(app: AppContext): void {
   })
 
   ipcMain.handle(IPC.widgetSetAlwaysOnTop, (_e, on: boolean) => {
+    // settings.set 之后 syncWidgetWindow 会把 setResizable(!on) 一起同步 ——
+    // 「置顶即锁定缩放」这条规则只写在 syncWidgetWindow 一处，不在 handler 里重复判断
     settings.set({ widgetAlwaysOnTop: on })
     app.syncWidgetWindow()
     return app.widgetStatus()
+  })
+
+  // 小组件拖动右下角手柄结束后上报（'resized' 事件对渲染层 resizeTo 不可靠，
+  // 所以由渲染层在 pointerup 时显式提交；尺寸由**主进程读自己的窗口**得到 ——
+  // 渲染层同步读 innerWidth 拿到的是 resizeTo 应用前的旧值，不能信）
+  ipcMain.handle(IPC.widgetResized, (e) => {
+    // ⚠ 必须校验来源：只有真正的小组件窗口才能改小组件尺寸。
+    // 主窗口的渲染层也持有同一个 preload，不校验的话主窗口能直接改小组件窗口大小
+    if (!isWidgetSender(e)) return app.widgetStatus()
+    const locked = settings.all().widgetAlwaysOnTop
+    if (locked) return app.widgetStatus()
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win || win.isDestroyed()) return app.widgetStatus()
+    const [gw, gh] = win.getSize()
+    const size = clampWidgetSize(gw, gh)
+    settings.set({ widgetW: size.w, widgetH: size.h })
+    // 不广播 tasksChanged：尺寸变化与任务数据无关，广播会让小组件白刷一次列表
+    return app.widgetStatus()
+  })
+
+  // 设置页的尺寸档位：交给主进程真正 setSize
+  ipcMain.handle(IPC.widgetSetSize, (_e, w: number, h: number) => {
+    app.setWidgetSize(Number(w), Number(h))
+    return app.widgetStatus()
+  })
+
+  // 小组件启动时问一次「我现在能不能缩放」，用于初始化手柄的禁用态
+  ipcMain.handle(IPC.widgetResizeState, (e) => {
+    if (!isWidgetSender(e)) return { resizable: false, lockedBy: 'alwaysOnTop' as const }
+    return widgetResizeState(app)
   })
 
   // 小组件里点击任务 / 点标题栏按钮 → 显示主窗口（有 taskId 则定位高亮）
@@ -211,10 +251,33 @@ const NOTIFY_SETTING_KEYS: Array<keyof AppSettings> = [
 
 /**
  * 改动这些设置需要真正创建/销毁小组件窗口。
- * widgetScope 刻意不在这里：它只影响小组件取数，不需要重建窗口 ——
- * settingsSet 末尾的 broadcastTasksChanged() 会叫醒小组件重新拉数据。
+ * widgetScope / widgetW / widgetH 刻意不在这里：它们只影响小组件自身，
+ * 不需要重建窗口 —— 尺寸由 setWidgetSize 直接改，重取数由 broadcastTasksChanged 叫醒。
  */
 const WIDGET_SETTING_KEYS: Array<keyof AppSettings> = [
   'widgetEnabled',
   'widgetAlwaysOnTop'
 ]
+
+/**
+ * 发起方是不是小组件窗口。
+ *
+ * 判断依据：这个 BrowserWindow 的页面 URL 指向 widget.html。
+ * 不去比对窗口实例 —— 小组件窗口会被 syncWidgetWindow 销毁重建，
+ * 持有一份引用反而更容易过期。
+ *
+ * 为什么要校验：preload 是共享的，主窗口渲染层也能 invoke 这些通道。
+ * 「主窗口能改小组件尺寸」虽不致命，但会让「谁在改尺寸」失去唯一答案。
+ */
+function isWidgetSender(e: Electron.IpcMainInvokeEvent): boolean {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  if (!win || win.isDestroyed()) return false
+  const url = win.webContents.getURL()
+  return url.includes('widget.html')
+}
+
+/** 从 AppContext 推导缩放可用性（判据只有「是否置顶」一条） */
+function widgetResizeState(app: AppContext): WindowResizedEvent {
+  const locked = app.widgetStatus().resizeLockedBy !== null
+  return { resizable: !locked, lockedBy: locked ? 'alwaysOnTop' : null }
+}

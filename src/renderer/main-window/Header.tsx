@@ -8,9 +8,13 @@ import { useAppStore, type PageKey } from '@renderer/shared/store/appStore'
  * 「看板」页的标题刻意不叫「看板」—— 侧栏的选中态已经表达了「你在看板」，
  * 右侧再写一遍就是标题重复（《UI优化》§4）。看板三列本身就是「待办池 / 今日待完成 /
  * 今日已完成」，标题写「今天」才与内容层级一致。
+ *
+ * 「today」这个 PageKey 对应的页面已从单列列表改为月历（《TodoList-今天页面改为月历视图》），
+ * UI 文案随之叫「日历」。PageKey 本身不改：深链 /?page=today、托盘入口与自动化截图
+ * 都引用它，改名的迁移成本远大于收益。
  */
 const TITLES: Record<PageKey, string> = {
-  today: '今天',
+  today: '日历',
   board: '今天',
   upcoming: '待办任务',
   all: '全部任务',
@@ -20,9 +24,16 @@ const TITLES: Record<PageKey, string> = {
   settings: '设置'
 }
 
-function subtitle(page: PageKey, today: string, counts: CategorySummary | null): string {
+function subtitle(
+  page: PageKey,
+  today: string,
+  counts: CategorySummary | null,
+  calendarSelected: string | null
+): string {
   switch (page) {
     case 'today':
+      // 跟随月历的选中日期（初始为今天），看哪个日期就显示哪个日期
+      return formatFullDateDotted(calendarSelected ?? today)
     case 'board':
       return formatFullDateDotted(today)
     case 'upcoming':
@@ -44,19 +55,24 @@ export function Header(): React.JSX.Element {
   const page = useAppStore((s) => s.page)
   const counts = useAppStore((s) => s.counts)
   const openCreator = useAppStore((s) => s.openCreator)
+  const calendarSelected = useAppStore((s) => s.calendarSelected)
   const today = todayKey()
+
+  // 「+ 添加任务」的默认截止日：只在日历页把选中日期（无选中则今天）传给编辑器；
+  // 其他页面不传，保持「新建默认无日期」的原行为 —— 新增逻辑本身没动，只传了初始值
+  const createDefaultDue = page === 'today' ? (calendarSelected ?? today) : undefined
 
   return (
     <header className="header">
       <div>
         <div className="header-title">{TITLES[page]}</div>
-        <div className="header-sub">{subtitle(page, today, counts)}</div>
+        <div className="header-sub">{subtitle(page, today, counts, calendarSelected)}</div>
       </div>
       {page !== 'settings' && (
         <div className="header-actions">
           {/* 打开完整编辑器，而不是把焦点丢给捕获条 ——
               用户点「添加任务」时往往就是要设日期/提醒，捕获条给不了这些字段 */}
-          <button type="button" className="header-link" onClick={openCreator}>
+          <button type="button" className="header-link" onClick={() => openCreator(createDefaultDue)}>
             + 添加任务
           </button>
         </div>

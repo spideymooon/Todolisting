@@ -16,6 +16,8 @@ export type IconName =
   | 'close'
   | 'widget'
   | 'repeat'
+  | 'chevron-left'
+  | 'chevron-right'
 
 const PATHS: Record<IconName, JSX.Element> = {
   calendar: (
@@ -101,7 +103,10 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M11.6 10.4H4.4A2.4 2.4 0 0 1 2 8v-.6" />
       <path d="M9.4 12.6l2.2-2.2-2.2-2.2" />
     </>
-  )
+  ),
+  /** 日历页的月份切换箭头。细 chevron，与 16 网格的其余图标同粗细 */
+  'chevron-left': <path d="M9.8 3.4 5.2 8l4.6 4.6" />,
+  'chevron-right': <path d="M6.2 3.4 10.8 8l-4.6 4.6" />
 }
 
 export function Icon({
